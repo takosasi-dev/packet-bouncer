@@ -12,15 +12,20 @@ config_version=5
 
 config/name="PacketBouncer"
 config/version="0.1.0"
-run/main_scene="res://ui/title.tscn"
+run/main_scene="res://ui/app.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+run/flush_stdout_on_print=true
+
+[autoload]
+
+Sfx="*res://audio/sfx.gd"
 
 [display]
 
 window/size/viewport_width=720
 window/size/viewport_height=1280
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+window/stretch/aspect="expand"
 
 [gui]
 

@@ -54,6 +54,8 @@ jobs:
           godot --headless --path . --export-release "Web" build/web/index.html
           ls -l build/web
           test -f build/web/index.html && test -f build/web/index.wasm && test -f build/web/index.pck
+          # AC-18: 書き出した index.html に外のドメインへの URL が無い
+          if grep -nE 'https?://' build/web/index.html; then echo "index.html に URL がある"; exit 1; fi
 
       - uses: actions/configure-pages@v6
 
