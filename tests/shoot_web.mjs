@@ -17,7 +17,8 @@ const OUT = path.join(ROOT, 'build', 'web_shots');
 const HTTP_PORT = 8771;
 const CDP_PORT = 9771;
 const BOOT_TIMEOUT_MS = 60000;
-const SETTLE_MS = 3000; // 起動の知らせの後、画面が描かれるまで
+const SETTLE_MS = 3000;
+const RELOAD_WAIT_MS = 20000; // 読み込み直して、登場の動きが終わるまで // 起動の知らせの後、画面が描かれるまで
 const BROWSERS = {
 	chrome: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
 	edge: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -161,6 +162,17 @@ async function perfectScenario(page, shot) {
 	}
 	await sleep(3500);
 	await shot('readme_result');
+	// 保存(FR-15・AC-22): 読み込み直すと自己ベストと今日の回数が残り、音を切にして読み込み直すと切のまま
+	const reload = async () => { await page.send('Page.reload', { ignoreCache: true }); await sleep(RELOAD_WAIT_MS); };
+	await reload();
+	await shot('saved_after_reload');
+	const scale = PHONE.width / 720;
+	await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 230 * scale, y: 1008 * scale, button: 'left', buttons: 1, clickCount: 1 }); // 「音 入」
+	await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 230 * scale, y: 1008 * scale, button: 'left', buttons: 0, clickCount: 1 });
+	await sleep(800);
+	await shot('sound_clicked');
+	await reload();
+	await shot('sound_after_reload');
 }
 
 async function shoot(name, exe, url, play) {
