@@ -4,7 +4,7 @@
 
 ブラウザで開くだけで遊べる、1 プレイ 3〜4 分のゲームです。プレイヤーはファイアウォール役になり、1 枚ずつ出てくるパケットを、画面のルール表に従って「通す」か「落とす」かに仕分けます。
 
-**遊ぶ: https://takosasi-dev.github.io/packet-bouncer/**(デスクトップ版の Chrome・Edge・Firefox と、スマホのブラウザ。インストール不要)
+**遊ぶ: [https://takosasi-dev.github.io/packet-bouncer/](https://takosasi-dev.github.io/packet-bouncer/)**(デスクトップ版の Chrome・Edge・Firefox と、スマホのブラウザ。インストール不要)
 
 <p align="center"><img src="docs/images/play.gif" width="320" alt="はじめての案内から今日の検問のステージ 1 を遊ぶ様子(解析・凍結の技とミスの表示)"></p>
 
