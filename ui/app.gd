@@ -42,6 +42,7 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	save.load_data()
 	Sfx.enabled = save.sound_on
+	Sfx.set_music(save.bgm_on and save.sound_on)
 
 	_bg = ColorRect.new()
 	_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -96,6 +97,7 @@ func _process(delta: float) -> void:
 	_crt_mat.set_shader_parameter("glitch", _glitch)
 	_crt_mat.set_shader_parameter("flash", _flash)
 	_bg_mat.set_shader_parameter("flash", _bg_flash)
+	_theme_tick(d)  # 担当 3
 
 
 # タッチ端末で最初の PERF_WINDOW_SEC 秒の速さを測り、遅ければ画面全体の仕上げ(画面の写しを読むシェーダー)を外す
@@ -191,6 +193,8 @@ func show_title(message: String = "") -> void:
 	var title := TitleScreen.new()
 	title.message = message
 	_swap(title)
+	set_stage_theme(0)
+	Sfx.music_stage(0)
 
 
 func start_daily() -> void:
@@ -202,10 +206,101 @@ func start_random() -> void:
 	_start("random", "", Rng.random_seed(), save.level)
 
 
+# 練習モード(FR-25)。難易度は関係ない(時間なし・ライフが減らない)
+func start_practice() -> void:
+	_start("practice", "", Rng.random_seed(), "normal")
+
+
+# ===== 担当 2: 実績の一覧(FR-31) =====
+func show_achievements() -> void:
+	var screen: Control = preload("res://ui/achievements_screen.gd").new()
+	screen.save = save
+	stage.add_child(screen)
+# ===== 担当 2 ここまで =====
+
+
+# ===== 担当 2: 図鑑(FR-32) =====
+func show_dex() -> void:
+	var screen: Control = preload("res://ui/dex_screen.gd").new()
+	screen.save = save
+	stage.add_child(screen)
+# ===== 担当 2 ここまで =====
+
+
+# ===== 担当 3: ステージごとの背景の演出(FR-27)。0 はタイトル・結果 =====
+# 1 行が 1 ステージ: [点と床の色, 床の速さの倍率, 光の強さ, 警報の赤 0〜1]。0 はタイトル・結果(シェーダーの既定と同じ)
+const THEMES := [
+	[Color(0.18, 0.55, 0.80), 1.0, 1.0, 0.0],
+	[Color(0.18, 0.55, 0.80), 1.0, 0.95, 0.0],
+	[Color(0.16, 0.64, 0.76), 1.08, 1.0, 0.0],
+	[Color(0.15, 0.72, 0.64), 1.16, 1.05, 0.0],
+	[Color(0.30, 0.48, 0.92), 1.24, 1.1, 0.0],
+	[Color(0.48, 0.38, 0.94), 1.32, 1.15, 0.0],
+	[Color(0.70, 0.34, 0.86), 1.42, 1.2, 0.0],
+	[Color(0.90, 0.48, 0.30), 1.54, 1.25, 0.15],
+	[Color(0.95, 0.22, 0.30), 1.72, 1.35, 1.0],
+]
+const THEME_SEC := 1.2  # 切り替わりの長さ
+const FLOOR_RATE := 1.2  # シェーダーの床の進み(t * 1.2)と同じ数
+
+var _theme_tween: Tween
+var _theme := {}  # 今の値(theme_for と同じ形。Tween で動かす)
+var _floor_offset := 0.0
+
+
+# そのステージの目標の値。「演出 弱」では色(と光の強さ)だけ変え、速さと脈打ちは変えない
+func theme_for(stage_no: int) -> Dictionary:
+	var row: Array = THEMES[clampi(stage_no, 0, THEMES.size() - 1)]
+	var low: bool = save.effects_low
+	var alarm: float = row[3]
+	return {
+		"grid_color": row[0],
+		"glow": row[2],
+		"alarm": alarm,
+		"pulse": 0.0 if low else alarm,
+		"floor_speed": 1.0 if low else float(row[1]),
+	}
+
+
+func set_stage_theme(stage_no: int) -> void:
+	var to := theme_for(stage_no)
+	if _theme.is_empty():
+		_theme = theme_for(0)
+	if _theme_tween != null:
+		_theme_tween.kill()
+	# シェーダーの値を直接 Tween しない(描画なしでは shader_parameter/ の項目が無く、Tween が動かない)
+	_theme_tween = create_tween().set_parallel().set_trans(Tween.TRANS_SINE)
+	for key: String in to:
+		_theme_tween.tween_method(_set_theme.bind(key), _theme[key], to[key], THEME_SEC)
+
+
+func _set_theme(value: Variant, key: String) -> void:
+	_theme[key] = value
+	if key != "floor_speed":
+		_bg_mat.set_shader_parameter(key, value)
+
+
+# 床の速さの上乗せ分を毎フレーム積み上げる(TIME に掛ける倍率を変えると、床が一瞬で飛ぶため)
+func _theme_tick(d: float) -> void:
+	var sp := LOW_BG_SPEED if save.effects_low else 1.0
+	var fs: float = _theme.get("floor_speed", 1.0)
+	_floor_offset = fposmod(_floor_offset + d * FLOOR_RATE * sp * (fs - 1.0), 1.0)
+	_bg_mat.set_shader_parameter("floor_offset", _floor_offset)
+# ===== 担当 3 ここまで =====
+
+
+# BGM の入/切(FR-30)。鳴らす・止めるは Sfx(担当 4)
+func set_bgm(on: bool) -> void:
+	save.set_bgm(on)
+	Sfx.set_music(on and save.sound_on)
+
+
 # 「もう一度」: 日替わりなら同じ日付の種、ランダムなら新しい種。難易度はそのランの物を引き継ぐ(FR-20)
 func retry(rs: RefCounted) -> void:
 	if rs.mode == "daily":
 		_start("daily", rs.date, Rng.daily_seed(rs.date), rs.level)
+	elif rs.mode == "practice":
+		start_practice()
 	else:
 		_start("random", "", Rng.random_seed(), rs.level)
 
@@ -225,14 +320,36 @@ func _start(mode: String, date: String, run_seed: int, level: String) -> void:
 # ランが終わったら 1 回呼ぶ(保存して結果画面へ)
 func finish_run(rs: RefCounted) -> void:
 	var attempts_before: int = save.daily_attempts(rs.date) if rs.mode == "daily" else 0
-	var new_best: bool = save.record_run(rs.mode, rs.date, rs.score, rs.correct, rs.stage(), rs.grid, rs.level)
+	var new_best := false
+	if not rs.is_practice():  # 練習は自己ベスト・日替わり・連続日数に数えない(FR-25)
+		new_best = save.record_run(rs.mode, rs.date, rs.score, rs.correct, rs.stage(), rs.grid, rs.level)
+	var earned: Array = _after_run(rs)
 	var result := ResultScreen.new()
 	result.rs = rs
 	result.attempts_before = attempts_before
 	result.new_best = new_best
+	result.streak = save.current_streak(rs.date) if rs.mode == "daily" else 0
+	result.earned = earned
 	_swap(result)
+	set_stage_theme(0)
+	Sfx.music_stage(0)
+
+
+# ===== 担当 2: ランの後の実績・図鑑の記録(FR-31・FR-32)。新しく取った実績の id を返す =====
+# 図鑑は練習も数える。実績の判定は図鑑と自己ベスト・連続日数を記録した後(record_run は finish_run が先に呼ぶ)
+func _after_run(rs: RefCounted) -> Array:
+	const Achievements := preload("res://core/achievements.gd")
+	save.add_ports(rs.ports_seen)
+	var fresh: Array = []
+	for id: String in Achievements.check(rs, save):
+		if save.unlock(id, Rng.today()):
+			fresh.append(id)
+	save.save_data()
+	return fresh
+# ===== 担当 2 ここまで =====
 
 
 func set_sound(on: bool) -> void:
 	save.set_sound(on)
 	Sfx.enabled = on
+	Sfx.set_music(on and save.bgm_on)

@@ -26,6 +26,13 @@ var skills_used := 0
 var frozen := false  # 今のカードの制限時間を止めている
 var scanned := false  # 今のカードで解析を使った
 var shield_on := false  # 次のミスでライフが減らない
+# ミスの記録(FR-24): {stage, card, rule_index, given, expected, timeout}。ルール表とカードは run から引く
+var misses: Array[Dictionary] = []
+var ports_seen: Array[int] = []  # 出たカードの宛先ポート(出た順、重複あり。図鑑 FR-32)
+
+
+func is_practice() -> bool:  # 練習モード(FR-25): 制限時間なし・ライフが減らない
+	return mode == "practice"
 var run_seed := 0
 var run: Dictionary = {}
 var stage_index := 0  # 0 始まり
@@ -59,6 +66,8 @@ func start(p_seed: int, p_mode: String, p_date: String = "", p_level: String = "
 	charges = B.SKILL_CHARGES.duplicate()
 	skills_used = 0
 	shield_on = false
+	misses.clear()
+	ports_seen.clear()
 	stage_index = 0
 	score = 0
 	lives = max_lives
@@ -198,7 +207,8 @@ func _begin_stage() -> void:
 
 func _show_card() -> void:
 	phase = Phase.CARD
-	time_limit = 0.0 if card_index < B.FREE_CARDS else B.TIME_LIMIT_SEC[stage_index] * B.LEVEL_TIME_SCALE[level]
+	time_limit = 0.0 if card_index < B.FREE_CARDS or is_practice() else B.TIME_LIMIT_SEC[stage_index] * B.LEVEL_TIME_SCALE[level]
+	ports_seen.append(current_card().dport)
 	time_left = time_limit
 	_warned = false
 	frozen = false
@@ -224,10 +234,12 @@ func _resolve(given: String, timeout: bool) -> Dictionary:
 		answered.emit(result)
 		_advance()
 	else:
+		misses.append({"stage": stage(), "card": card_index, "rule_index": verdict["rule_index"],
+			"given": given, "expected": verdict["action"], "timeout": timeout})
 		if shield_on:  # 防壁: ライフは減らないが、連続正解は 0・格子は x(FR-21)
 			shield_on = false
 			result["shielded"] = true
-		else:
+		elif not is_practice():
 			lives -= 1
 		streak = 0
 		grid[stage_index] = row.substr(0, card_index) + "x" + row.substr(card_index + 1)

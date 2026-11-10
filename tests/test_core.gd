@@ -266,6 +266,36 @@ func test_levels() -> bool:
 	return true
 
 
+# FR-25: 練習は制限時間なし・ライフが減らない。FR-24: ミスを記録する。FR-32: 出たポートを記録する
+func test_practice_misses_and_ports() -> bool:
+	var rs: RefCounted = RunState.new()
+	rs.start(Rng.daily_seed("2026-11-10"), "practice")
+	var guard := 0
+	while rs.phase != RunState.Phase.ENDED and guard < 2000:
+		guard += 1
+		if rs.phase == RunState.Phase.PANEL:
+			_tick_for(rs, B.PANEL_GUARD_SEC)
+			rs.dismiss_panel()
+		elif rs.phase == RunState.Phase.FEEDBACK:
+			rs.tick(B.MAX_DELTA)
+		else:
+			expect_eq(rs.time_limit, 0.0, "練習の制限時間")
+			rs.answer(_wrong(rs) if rs.card_index == 3 else _right(rs))
+	expect_eq(rs.phase, RunState.Phase.ENDED, "練習も 80 枚で終わる")
+	expect_eq(rs.lives, B.LIVES, "練習ではライフが減らない")
+	expect_eq(rs.misses.size(), B.STAGES, "ステージごとに 1 回ずつのミスを記録")
+	var m: Dictionary = rs.misses[0]
+	expect(m["stage"] == 1 and m["card"] == 3 and m["given"] != m["expected"] and not m["timeout"], "ミスの記録: " + str(m))
+	expect_eq(rs.ports_seen.size(), B.STAGES * B.CARDS_PER_STAGE, "出たポートの数")
+	expect_eq(rs.ports_seen[0], rs.run["stages"][0]["cards"][0].dport, "最初のポート")
+	var share := ShareText.build("practice", "", 0, 0, 0, 80, 8, rs.grid, "")
+	expect_eq(share.split("\n")[0], "PacketBouncer 練習", "練習の共有文")
+	var daily := ShareText.build("daily", "2026-11-10", 0, 0, 0, 80, 8, rs.grid, "", "normal", 0, 3)
+	expect_eq(daily.split("\n")[0], "PacketBouncer 2026-11-10 (初回) 3日連続", "連続日数の共有文")
+	expect_eq(ShareText.build("daily", "2026-11-10", 0, 0, 0, 80, 8, rs.grid, "", "normal", 0, 1).split("\n")[0], "PacketBouncer 2026-11-10 (初回)", "1 日目は連続を書かない")
+	return true
+
+
 func test_rank() -> bool:
 	var want := {80: "S", 79: "A", 72: "A", 71: "B", 60: "B", 59: "C", 40: "C", 39: "D", 0: "D"}
 	for n: int in want:

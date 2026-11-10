@@ -9,6 +9,7 @@ const Strings := preload("res://core/strings.gd")
 const RunState := preload("res://core/run_state.gd")
 const RuleTable := preload("res://ui/rule_table.gd")
 const Card := preload("res://ui/card.gd")
+const Tutorial := preload("res://ui/tutorial.gd")
 
 const MARGIN := 28.0
 const TABLE_Y := 150.0
@@ -49,6 +50,7 @@ var _fever := false
 var _answered_frame := -1
 var _shown_score := 0.0
 var _ending := false
+var _tutorial: Control  # はじめての案内(FR-23)。出ている間は時間も答えも止める
 
 
 class LifeIcons extends Control:
@@ -113,7 +115,7 @@ func _ready() -> void:
 	_reason.size = Vector2(RuleTable.WIDTH, 90)
 	_reason.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_reason.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_reason.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY  # Web 版は日本語の区切りの辞書が無いので字の間で折る
 	add_child(_reason)
 
 	_drop_btn = P.button(Strings.BTN_DROP, P.DROP, 40, 116)
@@ -245,6 +247,20 @@ func _build_hud() -> void:
 	_lives.total = rs.max_lives
 	_lives.lives = rs.lives
 	hud.add_child(_lives)
+	if rs.is_practice():  # 練習(FR-25): ライフは減らないので、印の代わりに「練習」と出す
+		_lives.visible = false
+		lives_cap.visible = false
+		var tag := P.label(Strings.PRACTICE, 34, P.NEW_ROW, P.bold())
+		tag.name = "PracticeTag"
+		tag.position = Vector2(500, 10)
+		tag.size = Vector2(144, 48)
+		tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hud.add_child(tag)
+		var sub := P.label(Strings.PRACTICE_HUD_SUB, 18, P.DIM)
+		sub.position = Vector2(500, 62)
+		sub.size = Vector2(144, 28)
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		hud.add_child(sub)
 
 
 func _build_panel() -> void:
@@ -281,7 +297,7 @@ func _build_panel() -> void:
 	_panel_hint.position = Vector2(40, 260)
 	_panel_hint.size = Vector2(640, 110)
 	_panel_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_panel_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_panel_hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY  # Web 版は日本語の区切りの辞書が無いので字の間で折る
 	_panel.add_child(_panel_hint)
 	_panel_go = P.label(Strings.PANEL_GO, 28, P.ALLOW)
 	_panel_go.position = Vector2(0, 430)
@@ -291,7 +307,7 @@ func _build_panel() -> void:
 
 
 func _process(delta: float) -> void:
-	if app.blocked() or is_paused():
+	if app.blocked() or is_paused() or tutorial_open():
 		return
 	rs.tick(delta)
 	if rs.phase == RunState.Phase.PANEL:
@@ -319,6 +335,9 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion:  # 担当 4: ゲームパッド(FR-33)
+		_pad_input(event)
+		return
 	if not event is InputEventKey or not event.pressed or event.echo:  # E-3
 		return
 	if event.keycode in [KEY_ESCAPE, KEY_P]:
@@ -348,21 +367,89 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+# ===== 担当 4: ゲームパッド(FR-33)。十字キー・左スティックの左右で落とす/通す、A でパネルを閉じる・再開、
+# X / Y / B で技 1 / 2 / 3、Start で一時停止。スティックはしきい値を超えた瞬間に 1 回だけ答え、戻すまで次を受けない =====
+const PAD_STICK_ON := 0.6
+const PAD_STICK_OFF := 0.3
+const PAD_SKILLS := {JOY_BUTTON_X: "freeze", JOY_BUTTON_Y: "scan", JOY_BUTTON_B: "shield"}
+
+var _pad_stick := 0  # 倒している向き(-1 / 0 / 1)
+
+
+func _pad_input(event: InputEvent) -> void:
+	if event is InputEventJoypadMotion:
+		if event.axis != JOY_AXIS_LEFT_X:
+			return
+		var v: float = event.axis_value
+		if absf(v) < PAD_STICK_OFF:
+			_pad_stick = 0
+		elif absf(v) >= PAD_STICK_ON and _pad_stick == 0:
+			_pad_stick = 1 if v > 0.0 else -1
+			if not is_paused():
+				_answer("allow" if v > 0.0 else "drop")
+		get_viewport().set_input_as_handled()
+		return
+	if not event.pressed:
+		return
+	var button: int = event.button_index
+	if button == JOY_BUTTON_START:
+		_set_paused(not is_paused())
+	elif is_paused():
+		if button == JOY_BUTTON_A:
+			_set_paused(false)
+	elif button == JOY_BUTTON_DPAD_LEFT:
+		_answer("drop")
+	elif button == JOY_BUTTON_DPAD_RIGHT:
+		_answer("allow")
+	elif button == JOY_BUTTON_A:
+		_dismiss_panel()
+	elif PAD_SKILLS.has(button):
+		_use_skill(PAD_SKILLS[button])
+	else:
+		return
+	get_viewport().set_input_as_handled()
+# ===== 担当 4 ここまで =====
+
 func _answer(action: String) -> void:
-	if app.blocked() or is_paused() or _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
+	if app.blocked() or is_paused() or tutorial_open() or _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
 		return  # E-1・E-2
 	_answered_frame = Engine.get_process_frames()
 	rs.answer(action)
 
 
 func _use_skill(skill: String) -> void:
-	if app.blocked() or is_paused() or _ending:
+	if app.blocked() or is_paused() or tutorial_open() or _ending:
 		return
 	rs.use_skill(skill)  # 使えないときは何もしない
 
 
 func is_paused() -> bool:
 	return _pause != null and _pause.visible
+
+
+func tutorial_open() -> bool:
+	return _tutorial != null and is_instance_valid(_tutorial) and _tutorial.visible
+
+
+# はじめての案内(FR-23): ルール表の 1 行目とカード → 既定の行 → 落とす/通す のボタン、の順に指す
+func _open_tutorial() -> void:
+	var row := func(i: int) -> Rect2:
+		return Rect2(_table.position + Vector2(0, RuleTable.HEADER_H + i * (RuleTable.ROW_H + RuleTable.ROW_GAP)), Vector2(RuleTable.WIDTH, RuleTable.ROW_H))
+	var rects: Array = [
+		[row.call(0), Rect2(_card.home, Vector2(RuleTable.WIDTH, Card.HEIGHT))],
+		[row.call(rs.rules().size())],
+		[Rect2(_drop_btn.position, _drop_btn.size), Rect2(_allow_btn.position, _allow_btn.size)],
+	]
+	_tutorial = Tutorial.new()
+	_tutorial.play = self
+	_tutorial.effects_low = app.save.effects_low
+	for i in Strings.TUT_STEPS.size():
+		_tutorial.steps.append({"text": Strings.TUT_STEPS[i], "rects": rects[mini(i, rects.size() - 1)]})
+	_tutorial.closed.connect(func() -> void:
+		_tutorial = null
+		app.save.set_tutorial_done())
+	add_child(_tutorial)
+	move_child(_tutorial, _pause.get_index())  # 一時停止の画面はこの上に出す
 
 
 # 一時停止: 時間を止め、表とカードを隠す(止めて読む抜け道にしない)。終わりかけと結果の前は受けない
@@ -487,6 +574,8 @@ func _on_stage_started(stage: int) -> void:
 	Sfx.play("rule_update")
 	app.flash(P.NEW_ROW, 0.5)
 	app.glitch(0.35)
+	app.set_stage_theme(stage)  # 担当 3
+	Sfx.music_stage(stage)  # 担当 4
 
 
 func _on_card_shown(packet: RefCounted) -> void:
@@ -506,6 +595,8 @@ func _on_card_shown(packet: RefCounted) -> void:
 	_card.set_packet(packet, rs.card_index + 1, B.CARDS_PER_STAGE, rs.time_limit > 0.0, dims)
 	_card.enter()
 	_card.interactive = true
+	if rs.stage() == 1 and rs.card_index == 0 and not app.save.tutorial_done:
+		_open_tutorial()
 
 
 func _on_drag(ratio: float) -> void:

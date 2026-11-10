@@ -2,8 +2,12 @@
 // URL を渡さなければ build/web を /packet-bouncer/ の下に置いて手元で配信する。--play を付けると、Chrome で 1 ラン遊んで各画面を撮る。
 // 起動したか・転送量(キャッシュ無効)・通信先のホスト・コンソールのエラーを出す。画像は build/web_shots/
 // --mobile はスマホのエミュレーション(タッチ)で遊んで撮る。--perfect は今日の検問を正しく答えて 80 枚を通し(1 回だけわざとミス)、README 用の画像を撮る(答えは tests/answer_key.mjs)。
+// --loading は転送を絞って読み込み中の画面(FR-28)を撮り、WebGL 2 が無いときの知らせも撮る。
+// --progress はスマホのエミュレーションで、タイトルから実績の一覧と図鑑を開き、図鑑を指で送って撮る(--perfect の最後にも一覧と図鑑を撮る)。
+// --learn ははじめての案内の各段・ミスの振り返り(わざとミスと時間切れ)・練習の HUD と結果を撮る。
 // --gif はタイトル → ルール更新 → ステージ 1 の 10 枚(1 回だけわざとミス)を録って docs/images/play.gif に書く(ffmpeg を使う)。
-//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect | --mobile | --gif]
+//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect | --mobile | --loading | --progress | --learn | --gif]
+// 使い捨てのプロフィールは毎回初めて遊ぶ扱いなので、ステージ 1 の 1 枚目で、はじめての案内(FR-23)が出る。どの流れも Space か タップで閉じてから進む
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,8 +19,9 @@ import { dailyAnswers, localDate, selfCheck } from './answer_key.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'build', 'web');
 const OUT = path.join(ROOT, 'build', 'web_shots');
-const HTTP_PORT = 8771;
-const CDP_PORT = 9771;
+// 何人かで同時に撮るときは、環境変数 SHOOT_HTTP_PORT・SHOOT_CDP_PORT で番号をずらす
+const HTTP_PORT = Number(process.env.SHOOT_HTTP_PORT || 8771);
+const CDP_PORT = Number(process.env.SHOOT_CDP_PORT || 9771);
 const BOOT_TIMEOUT_MS = 60000;
 const SETTLE_MS = 3000;
 const RELOAD_WAIT_MS = 20000; // 読み込み直して、登場の動きが終わるまで // 起動の知らせの後、画面が描かれるまで
@@ -31,6 +36,7 @@ const FFMPEG = process.env.FFMPEG || 'ffmpeg'; // PATH に無ければ環境変�
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 540, height: 960 }; // 720 × 1280 の 0.75 倍
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true }; // iPhone くらいの縦長
+const PRACTICE_BTN = { x: 497, y: 750 }; // タイトルの「練習」(ui/title.gd の並び。720 × 1280 の座標)
 const KEYS = {
 	Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
 	Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' },
@@ -39,7 +45,20 @@ const KEYS = {
 	Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
 	Digit1: { key: '1', code: 'Digit1', windowsVirtualKeyCode: 49, text: '1' },
 	Digit2: { key: '2', code: 'Digit2', windowsVirtualKeyCode: 50, text: '2' },
+	KeyD: { key: 'd', code: 'KeyD', windowsVirtualKeyCode: 68, text: 'd' },
 };
+
+const TUT_STEPS = 3; // はじめての案内の段の数(core/strings.gd の TUT_STEPS)
+const GRID = { x: (720 - (38 * 10 + 4 * 9)) / 2, y: 464, step: 42 }; // 結果の格子(ui/result.gd の CELL・CELL_GAP)
+
+// はじめての案内を Space で 1 段ずつ閉じる。shot を渡すと各段を撮る。閉じた後の余分な Space はカードの間は何も起こさない
+async function closeTutorial(press, shot) {
+	for (let i = 1; i <= TUT_STEPS; i++) {
+		if (shot) await shot(`tutorial_${i}`);
+		await press('Space');
+		await sleep(350);
+	}
+}
 
 let failures = 0;
 function expect(ok, label) {
@@ -102,6 +121,7 @@ async function playScenario(page, shot) {
 	await shot('02_panel');
 	await press('Space');
 	await sleep(900);
+	await closeTutorial(press);
 	await shot('03_card');
 	// 技の解析(2 キー)と一時停止(Esc → Space で再開)
 	await press('Digit2');
@@ -147,6 +167,54 @@ async function playScenario(page, shot) {
 	await sleep(800);
 	const shared = (await page.send('Runtime.evaluate', { expression: 'window.__shared ? window.__shared.text : null', returnByValue: true })).result.value;
 	expect(typeof shared === 'string' && shared.startsWith('PacketBouncer ') && shared.includes('https://takosasi-dev.github.io/packet-bouncer/'), `「結果を送る」で共有に渡った文字: ${JSON.stringify(shared)}`);
+	await checkSharedImage(page, async () => {
+		await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 531 * scale, y: 1034 * scale, button: 'left', buttons: 1, clickCount: 1 });
+		await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 531 * scale, y: 1034 * scale, button: 'left', buttons: 0, clickCount: 1 });
+		await sleep(800);
+	});
+}
+
+// 画像の共有(FR-29): 偽の canShare が files を受けると言えば、PNG が 1 つ文字と一緒に渡る。canShare が無ければ files なしで文字だけ
+async function checkSharedImage(page, clickSend) {
+	const file = (await page.send('Runtime.evaluate', {
+		expression: `(async () => {
+			const f = window.__shared && window.__shared.files;
+			if (!Array.isArray(f) || f.length !== 1) return { count: Array.isArray(f) ? f.length : -1 };
+			const bytes = new Uint8Array(await f[0].arrayBuffer());
+			let bin = '';
+			for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+			return { count: 1, name: f[0].name, type: f[0].type, size: bytes.length, b64: btoa(bin) };
+		})()`,
+		awaitPromise: true, returnByValue: true,
+	})).result.value;
+	const png = file.b64 ? Buffer.from(file.b64, 'base64') : Buffer.alloc(0);
+	if (png.length > 0) writeFileSync(path.join(OUT, 'shared_image.png'), png);
+	expect(file.count === 1 && file.type === 'image/png' && png.length > 1000 && png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+		`「結果を送る」で PNG が 1 つ渡った(${file.count} 個、${file.type}、${png.length} バイト、build/web_shots/shared_image.png)`);
+	await page.send('Runtime.evaluate', { expression: 'window.__shared = null; navigator.canShare = undefined;' });
+	await clickSend();
+	const plain = (await page.send('Runtime.evaluate', { expression: 'window.__shared ? { text: typeof window.__shared.text, files: window.__shared.files === undefined } : null', returnByValue: true })).result.value;
+	expect(plain !== null && plain.text === 'string' && plain.files, `canShare が無いときは文字だけ渡る: ${JSON.stringify(plain)}`);
+}
+
+// 読み込み中の画面(FR-28): 転送を絞り、進み具合のバーが途中まで来たら撮る。題名は ::before の文字
+async function loadingScenario(page, shot, logs) {
+	const progress = async () => (await page.send('Runtime.evaluate', { expression: "(() => { const p = document.getElementById('status-progress'); return p && p.max > 1 ? p.value / p.max : -1; })()", returnByValue: true })).result.value;
+	const mid = await waitFor(async () => { const v = await progress(); return v > 0.3 && v < 0.9 ? v : null; }, BOOT_TIMEOUT_MS);
+	expect(mid !== null, `読み込み中: 進み具合のバーが途中まで進んだ(${mid})`);
+	await shot('00_loading');
+	const title = (await page.send('Runtime.evaluate', { expression: "getComputedStyle(document.getElementById('status'), '::before').content", returnByValue: true })).result.value;
+	expect(title === '"パケット検問"', `読み込み中: 題名 ${title}`);
+	await page.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+	// WebGL 2 が無い端末: 知らせが出る(console.error は Godot のシェルが出す物なので、エラーの数からは外す)
+	await waitFor(() => logs.some((l) => l.text.startsWith('Godot Engine v')), BOOT_TIMEOUT_MS);
+	await page.send('Page.addScriptToEvaluateOnNewDocument', { source: "const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return t === 'webgl2' ? null : g.call(this, t, ...a); };" });
+	await page.send('Page.reload', { ignoreCache: true });
+	await sleep(4000);
+	await shot('00_no_webgl');
+	const notice = (await page.send('Runtime.evaluate', { expression: "(() => { const n = document.getElementById('status-notice'); return n && getComputedStyle(n).display !== 'none' ? n.textContent : null; })()", returnByValue: true })).result.value;
+	expect(typeof notice === 'string' && notice.includes('WebGL2'), `WebGL 2 が無いと知らせが出る: ${JSON.stringify(notice)}`);
+	for (let i = logs.length - 1; i >= 0; i--) if (logs[i].text.includes('features required to run Godot')) logs.splice(i, 1);
 }
 
 // 今日の検問を正しく答えて通す。ステージ 7 の 6 枚目だけわざと間違えて、順序のひっかけのミスを撮る
@@ -161,7 +229,7 @@ async function perfectScenario(page, shot) {
 		await page.send('Runtime.evaluate', { expression: "document.documentElement.style.filter=''" });
 	};
 	const { answers } = dailyAnswers(localDate());
-	const SHOTS = { '2-7': 'combo', '5-4': 'stage5', '7-3': 'stage7' };
+	const SHOTS = { '1-3': 'stage1', '2-7': 'combo', '4-3': 'stage4', '5-4': 'stage5', '7-3': 'stage7', '8-3': 'stage8' };
 	const MISS = '7-6';
 	await press('Enter');
 	await sleep(1500);
@@ -173,6 +241,7 @@ async function perfectScenario(page, shot) {
 		}
 		await press('Space');
 		await sleep(700);
+		if (s === 1) await closeTutorial(press);
 		for (let k = 1; k <= 10; k++) {
 			const key = `${s}-${k}`;
 			if (SHOTS[key]) await shot(`readme_${SHOTS[key]}`);
@@ -196,12 +265,121 @@ async function perfectScenario(page, shot) {
 	await reload();
 	await shot('saved_after_reload');
 	const scale = PHONE.width / 720;
-	await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 230 * scale, y: 1008 * scale, button: 'left', buttons: 1, clickCount: 1 }); // 「音 入」
-	await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 230 * scale, y: 1008 * scale, button: 'left', buttons: 0, clickCount: 1 });
+	// 「音 入」はタイトルの一番下の列の左(ui/title.gd の並び。舞台の座標でおよそ x 188・y 1155)
+	await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 188 * scale, y: 1155 * scale, button: 'left', buttons: 1, clickCount: 1 });
+	await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 188 * scale, y: 1155 * scale, button: 'left', buttons: 0, clickCount: 1 });
 	await sleep(800);
 	await shot('sound_clicked');
 	await reload();
 	await shot('sound_after_reload');
+	await progressShots(page, shot, PHONE.width / 720, 0, false);
+}
+
+// 担当 2: タイトルから実績の一覧と図鑑を重ねて撮る(ボタンは ui/title.gd の「実績・図鑑・あそびかた」の行)。
+// touch なら指で図鑑を送る(スマホで動かせるか)。送る前後の画像が違えば動いた
+async function progressShots(page, shot, s, top, touch) {
+	const at = (x, y) => ({ x: x * s, y: top + y * s });
+	const press = async (name) => {
+		await page.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS[name] });
+		await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS[name] });
+	};
+	const tap = async (x, y) => {
+		const p = at(x, y);
+		if (touch) {
+			await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...p, id: 0 }] });
+			await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+		} else {
+			await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...p, button: 'left', buttons: 1, clickCount: 1 });
+			await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'left', buttons: 0, clickCount: 1 });
+		}
+	};
+	const capture = async () => (await page.send('Page.captureScreenshot', { format: 'png' })).data;
+	await tap(188, 1067); // 実績
+	await sleep(800);
+	await shot('p_achievements');
+	await press('Escape');
+	await sleep(500);
+	await tap(360, 1067); // 図鑑
+	await sleep(800);
+	await shot('p_dex');
+	const before = await capture();
+	if (touch) {
+		const c = at(360, 800);
+		await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...c, id: 0 }] });
+		for (let dy = 0; dy <= 500; dy += 25) await page.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: c.x, y: c.y - dy * s, id: 0 }] });
+		await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	} else {
+		const c = at(360, 600);
+		await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...c, deltaX: 0, deltaY: 600 });
+	}
+	await sleep(800);
+	await shot('p_dex_scrolled');
+	expect(before !== await capture(), `図鑑を${touch ? '指' : 'ホイール'}で送ると画面が動く`);
+	await press('Space'); // フォーカスのある「閉じる」
+	await sleep(600);
+	await shot('p_closed');
+}
+
+// はじめての案内(FR-23)・ミスの振り返り(FR-24)・練習(FR-25)を撮る。今日の検問のステージ 1 で、
+// 1 枚目をわざと間違え、3 枚目(制限時間あり)は時間切れにし、4 枚目もわざと間違えてライフを切らす
+async function learnScenario(page, shot) {
+	const press = async (name) => {
+		await page.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS[name] });
+		await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS[name] });
+	};
+	const scale = PHONE.width / 720;
+	const click = async (x, y) => {
+		for (const type of ['mousePressed', 'mouseReleased']) {
+			await page.send('Input.dispatchMouseEvent', { type, x: x * scale, y: y * scale, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+		}
+	};
+	const { answers } = dailyAnswers(localDate());
+	const wrong = (k) => (answers[0][k - 1].action === 'allow' ? 'ArrowLeft' : 'ArrowRight');
+	const right = (k) => (answers[0][k - 1].action === 'allow' ? 'ArrowRight' : 'ArrowLeft');
+	await press('Enter');
+	await sleep(1500);
+	await press('Space');
+	await sleep(900);
+	await press('ArrowLeft'); // 案内の間は答えにならない
+	await sleep(300);
+	await closeTutorial(press, (n) => shot(`30_${n}`));
+	await shot('31_card_after_tutorial');
+	await press(wrong(1));
+	await sleep(1800);
+	await press(right(2));
+	await sleep(600);
+	await sleep(9000); // 3 枚目は時間切れ(ステージ 1 は 8 秒)
+	await press(wrong(4));
+	await sleep(3500);
+	await shot('32_result');
+	await click(GRID.x + 0 * GRID.step + 19, GRID.y + 19); // ステージ 1 の 1 枚目の x
+	await sleep(600);
+	await shot('33_review_1');
+	await press('ArrowRight');
+	await sleep(500);
+	await shot('34_review_2_timeout');
+	await press('Space'); // 閉じる(「もう一度」は押さない)
+	await sleep(600);
+	await shot('35_review_closed');
+	await click(531, 1188); // タイトルへ
+	await sleep(1500);
+	await click(PRACTICE_BTN.x, PRACTICE_BTN.y);
+	await sleep(1500);
+	await press('Space');
+	await sleep(900);
+	await shot('36_practice_card');
+	// 練習は時間もライフも無いので、通す(D キー)を押し続けて 80 枚を終える(落とすカードはミスになる)。パネルはタップで閉じる。
+	// 結果画面に着いても何も押さないよう、Space・矢印は使わない(フォーカスのボタンが動く)。
+	// 窓なしの描画は遅く、1 コマに進む時間に上限がある(INV-3)ので、ミスの止まりが実時間より長い
+	const end = Date.now() + 300000;
+	while (Date.now() < end) {
+		await press('KeyD');
+		await sleep(200);
+		await click(360, 900);
+		await sleep(150);
+	}
+	await sleep(3000);
+	await shot('37_practice_result');
 }
 
 // README の動く画像: タイトル → 今日の検問 → ルール更新のパネル → ステージ 1 の 10 枚を正しく答える(6 枚目だけわざとミス)。
@@ -230,6 +408,7 @@ async function gifScenario(page) {
 	await sleep(1500); // ルール更新のパネル(PANEL_GUARD_SEC より長く)
 	await press('Space');
 	await sleep(700);
+	await closeTutorial(press);
 	for (let k = 1; k <= 10; k++) {
 		const right = answers[0][k - 1].action;
 		const give = k === MISS ? (right === 'allow' ? 'drop' : 'allow') : right;
@@ -291,6 +470,11 @@ async function mobileScenario(page, shot) {
 	await shot('m02_panel');
 	await tap(360, 900); // パネルを閉じる
 	await sleep(900);
+	await shot('m03_tutorial');
+	for (let i = 0; i < TUT_STEPS; i++) { // 案内はどこをタップしても次へ。カードを掴まないよう HUD の位置を押す
+		await tap(360, 80);
+		await sleep(350);
+	}
 	await shot('m03_card');
 	// 1 枚目: 指で右へスワイプ。途中で 2 本目の指が左へ動いても、最初の指だけを追う(E-4)
 	const c = at(360, 765);
@@ -350,21 +534,23 @@ async function shoot(name, exe, url, play) {
 		for (const m of ['Runtime.enable', 'Log.enable', 'Page.enable', 'Network.enable']) await page.send(m);
 		await page.send('Network.setCacheDisabled', { cacheDisabled: true });
 		await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-		if (play === 'mobile') {
+		if (play === 'mobile' || play === 'progress') {
 			await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 			await page.send('Emulation.setDeviceMetricsOverride', MOBILE);
 		} else {
 			await page.send('Emulation.setDeviceMetricsOverride', { ...(play ? PHONE : DESKTOP), deviceScaleFactor: 1, mobile: false });
 		}
-		if (play === 'play') await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'navigator.share = async (d) => { window.__shared = d; };' }); // 「結果を送る」を出させる
-		await page.send('Page.navigate', { url });
-		const booted = await waitFor(() => logs.some((l) => l.text.startsWith('Godot Engine v')), BOOT_TIMEOUT_MS);
-		expect(booted !== null, `${name}: ${url} で Godot が起動した`);
-		await sleep(SETTLE_MS);
+		if (play === 'play') await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'navigator.share = async (d) => { window.__shared = d; }; navigator.canShare = (d) => !!(d && Array.isArray(d.files) && d.files.length > 0);' }); // 「結果を送る」を出させる。画像も受ける
 		const shot = async (label) => {
 			const file = path.join(OUT, `${name}_${label}.png`);
 			writeFileSync(file, Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
 		};
+		if (play === 'loading') await page.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: 4e6, uploadThroughput: -1 });
+		await page.send('Page.navigate', { url });
+		if (play === 'loading') await loadingScenario(page, shot, logs);
+		const booted = await waitFor(() => logs.some((l) => l.text.startsWith('Godot Engine v')), BOOT_TIMEOUT_MS);
+		expect(booted !== null, `${name}: ${url} で Godot が起動した`);
+		await sleep(SETTLE_MS);
 		if (play) await sleep(SETTLE_MS * 2); // 最初の数秒はシェーダーのコンパイルで遅く、登場の動きが終わっていない
 		await shot('01_title');
 		console.log(`    転送量(キャッシュ無効、encodedDataLength の合計): ${(bytes / 1e6).toFixed(2)} MB`);
@@ -372,6 +558,8 @@ async function shoot(name, exe, url, play) {
 		if (play === 'play') await playScenario(page, shot);
 		else if (play === 'perfect') await perfectScenario(page, shot);
 		else if (play === 'mobile') await mobileScenario(page, shot);
+		else if (play === 'progress') await progressShots(page, shot, MOBILE.width / 720, (MOBILE.height - 1280 * MOBILE.width / 720) / 2, true);
+		else if (play === 'learn') await learnScenario(page, shot);
 		else if (play === 'gif') await gifScenario(page);
 		const errors = logs.filter((l) => ['error', 'exception'].includes(l.level) && !l.text.includes('favicon.ico'));
 		errors.forEach((l) => console.log(`    [${l.level}] ${l.text}`));
@@ -389,8 +577,8 @@ async function shoot(name, exe, url, play) {
 async function main() {
 	rmSync(OUT, { recursive: true, force: true });
 	mkdirSync(OUT, { recursive: true });
-	const play = ['play', 'perfect', 'mobile', 'gif'].find((m) => process.argv.includes(`--${m}`)) ?? '';
-	if (['perfect', 'mobile', 'gif'].includes(play) && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
+	const play = ['play', 'perfect', 'mobile', 'loading', 'gif', 'progress', 'learn'].find((m) => process.argv.includes(`--${m}`)) ?? '';
+	if (['perfect', 'mobile', 'learn', 'gif'].includes(play) && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
 	let url = process.argv.slice(2).find((a) => !a.startsWith('--'));
 	let server = null;
 	let root = null;

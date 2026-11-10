@@ -74,6 +74,46 @@ func test_levels_and_best_by_level() -> bool:
 	return true
 
 
+# FR-23・FR-26・FR-30〜FR-32 の保存(2026-11-10 夜)。連続日数は翌日なら +1、同じ日は数えない、飛んだら 1 から
+func test_streak_and_new_fields() -> bool:
+	DirAccess.remove_absolute(PATH)
+	var store := _fresh()
+	expect(not store.tutorial_done and store.bgm_on and store.achievements.is_empty() and store.dex.is_empty(), "新しい項目の既定値")
+	expect_eq(SaveStore.next_day("2026-11-30"), "2026-12-01", "月をまたぐ翌日")
+	expect_eq(SaveStore.next_day("2026-12-31"), "2027-01-01", "年をまたぐ翌日")
+	store.record_run("daily", "2026-11-09", 1, 1, 1, GRID)
+	store.record_run("daily", "2026-11-09", 1, 1, 1, GRID)
+	expect_eq(store.streak_count, 1, "同じ日の 2 回目は数えない")
+	store.record_run("daily", "2026-11-10", 1, 1, 1, GRID)
+	expect_eq(_fresh().streak_count, 2, "翌日で 2 日連続(読み直し後)")
+	expect_eq(store.current_streak("2026-11-10"), 2, "今日の時点")
+	expect_eq(store.current_streak("2026-11-11"), 2, "翌日はまだ続いている")
+	expect_eq(store.current_streak("2026-11-12"), 0, "2 日空いたら 0")
+	store.record_run("random", "", 1, 1, 1, GRID)
+	expect_eq(store.streak_last, "2026-11-10", "ランダムは連続日数に数えない")
+	store.record_run("daily", "2026-11-08", 1, 1, 1, GRID)
+	expect_eq(store.streak_count, 2, "時計が戻った日付は数えない")
+	store.record_run("daily", "2026-11-13", 1, 1, 1, GRID)
+	expect_eq(store.streak_count, 1, "間が空いたら 1 から")
+	expect(store.unlock("first_clear", "2026-11-13") and not store.unlock("first_clear", "2026-11-14"), "実績は 1 回だけ取れる")
+	expect_eq(store.add_ports([80, 443, 80]), [80, 443] as Array[int], "初めて出会ったポート")
+	expect_eq(store.add_ports([80, 22]), [22] as Array[int], "2 回目は新しい物だけ")
+	store.set_tutorial_done()
+	store.set_bgm(false)
+	store = _fresh()
+	expect(store.tutorial_done and not store.bgm_on, "案内と BGM を読み直す")
+	expect_eq(store.achievements.get("first_clear"), "2026-11-13", "実績を読み直す")
+	expect_eq(store.dex.get("80"), 3, "図鑑の回数を読み直す")
+	var file := FileAccess.open(PATH, FileAccess.WRITE)
+	file.store_string('{"version": 1, "best_score": 0, "sound_on": true, "daily": {}, "tutorial_done": "yes", "bgm_on": 0, "streak_last": "x", "streak_count": 3, "achievements": {"a": 1, "b": "2026-11-10"}, "dex": {"80": "many", "abc": 2, "22": 4}}')
+	file.close()
+	store = _fresh()
+	expect(not store.tutorial_done and store.bgm_on and store.streak_last == "" and store.streak_count == 0, "型の違う新しい項目は既定値")
+	expect(store.achievements.size() == 1 and store.dex.size() == 1 and store.dex.get("22") == 4, "壊れた実績・図鑑は捨てる")
+	DirAccess.remove_absolute(PATH)
+	return true
+
+
 func test_broken_file_starts_from_default() -> bool:
 	for text: String in ["{ broken", "[1, 2]", '{"version": 2, "best_score": 5, "sound_on": false, "daily": {}}',
 			'{"version": "1", "best_score": 5, "sound_on": false, "daily": {}}', '{"version": 1, "best_score": "5", "sound_on": false, "daily": {}}']:

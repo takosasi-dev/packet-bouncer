@@ -13,6 +13,7 @@ var _logo: Control
 var _ghosts: Array[Label] = []
 var _sound: Button
 var _effects: Button
+var _bgm: Button
 var _best: Label
 var _levels: Dictionary = {}  # 難易度 -> ボタン(FR-20)
 var _howto: Control
@@ -30,8 +31,9 @@ func _ready() -> void:
 	tag.size = Vector2(720, 40)
 	add_child(tag)
 
+	# 並び(2026-11-10 夜に決めた配置。担当は動かさない): 今日の検問 / ランダム・練習 / 難易度 / 実績・図鑑・あそびかた / 音・BGM・演出
 	var menu := VBoxContainer.new()
-	menu.position = Vector2(110, 580)
+	menu.position = Vector2(110, 556)
 	menu.size = Vector2(500, 0)
 	menu.add_theme_constant_override("separation", 16)
 	add_child(menu)
@@ -40,9 +42,17 @@ func _ready() -> void:
 	var daily := _big_button(Strings.DAILY, _daily_sub(date), P.ALLOW)
 	daily.pressed.connect(_go.bind("daily"))
 	menu.add_child(daily)
+	var modes := HBoxContainer.new()
+	modes.add_theme_constant_override("separation", 14)
+	menu.add_child(modes)
 	var random := _big_button(Strings.RANDOM, Strings.RANDOM_SUB, P.ACCENT)
+	random.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	random.pressed.connect(_go.bind("random"))
-	menu.add_child(random)
+	modes.add_child(random)
+	var practice := _big_button(Strings.PRACTICE, Strings.PRACTICE_SUB, P.NEW_ROW)
+	practice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	practice.pressed.connect(_go.bind("practice"))
+	modes.add_child(practice)
 
 	var levels := HBoxContainer.new()
 	levels.add_theme_constant_override("separation", 14)
@@ -52,26 +62,30 @@ func _ready() -> void:
 		levels.add_child(lb)
 		_levels[l] = lb
 
+	var lists := HBoxContainer.new()
+	lists.add_theme_constant_override("separation", 14)
+	menu.add_child(lists)
+	var ach := _small_button(Strings.ACHIEVEMENTS, P.NEW_ROW, lists)
+	ach.pressed.connect(func() -> void: app.show_achievements())  # 中身は担当 2
+	var dex := _small_button(Strings.DEX, P.ACCENT, lists)
+	dex.pressed.connect(func() -> void: app.show_dex())  # 中身は担当 2
+	var howto := _small_button(Strings.HOWTO, P.DIM, lists)
+	howto.pressed.connect(_toggle_howto)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
 	menu.add_child(row)
-	_sound = P.button("", P.DIM, 26, 80)
-	_sound.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sound = _small_button("", P.DIM, row)
 	_sound.pressed.connect(_toggle_sound)
-	row.add_child(_sound)
-	_effects = P.button("", P.DIM, 26, 80)
-	_effects.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bgm = _small_button("", P.DIM, row)
+	_bgm.pressed.connect(_toggle_bgm)
+	_effects = _small_button("", P.DIM, row)
 	_effects.pressed.connect(_toggle_effects)
-	row.add_child(_effects)
-	var howto := P.button(Strings.HOWTO, P.DIM, 26, 80)
-	howto.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	howto.pressed.connect(_toggle_howto)
-	row.add_child(howto)
 	_update_sound()
 
 	var best := P.label("", 30, P.TEXT, P.mono())
 	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	best.position = Vector2(0, 1150)
+	best.position = Vector2(0, 1196)
 	best.size = Vector2(720, 44)
 	add_child(best)
 	_best = best
@@ -80,13 +94,13 @@ func _ready() -> void:
 	if message != "":
 		var note := P.label(message, 24, P.WARN)
 		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		note.position = Vector2(0, 1190)
+		note.position = Vector2(0, 1236)
 		note.size = Vector2(720, 40)
 		add_child(note)
 
 	var version := P.label(Strings.VERSION_FORMAT % ProjectSettings.get_setting("application/config/version"), 22, P.DIM, P.mono())
 	version.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	version.position = Vector2(0, 1232)
+	version.position = Vector2(0, 1242)
 	version.size = Vector2(690, 30)
 	add_child(version)
 
@@ -98,7 +112,25 @@ func _ready() -> void:
 func _daily_sub(date: String) -> String:
 	var played: int = app.save.daily_attempts(date)
 	var sub := Strings.DAILY_SUB % date
-	return sub if played == 0 else sub + "  " + Strings.DAILY_PLAYED % (played + 1)
+	if played > 0:
+		sub += "  " + Strings.DAILY_PLAYED % (played + 1)
+	var streak: int = app.save.current_streak(date)
+	if streak >= 2:  # FR-26
+		sub += "  " + Strings.STREAK % streak
+	return sub
+
+
+func _small_button(text: String, color: Color, parent: Control) -> Button:
+	var b := P.button(text, color, 26, 72)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(b)
+	return b
+
+
+func _toggle_bgm() -> void:
+	app.set_bgm(not app.save.bgm_on)  # 鳴らす・止めるのは担当 4(app.set_bgm)
+	_update_sound()
+	Sfx.play("correct")
 
 
 func _big_button(text: String, sub: String, color: Color) -> Button:
@@ -226,6 +258,8 @@ func _go(mode: String) -> void:
 	app.flash(P.ALLOW, 0.6)
 	if mode == "daily":
 		app.start_daily()
+	elif mode == "practice":
+		app.start_practice()
 	else:
 		app.start_random()
 
@@ -238,6 +272,7 @@ func _toggle_sound() -> void:
 
 func _update_sound() -> void:
 	_sound.text = Strings.SOUND_ON if app.save.sound_on else Strings.SOUND_OFF
+	_bgm.text = Strings.BGM_ON if app.save.bgm_on else Strings.BGM_OFF
 	_effects.text = Strings.EFFECTS_LOW if app.save.effects_low else Strings.EFFECTS_FULL
 
 
@@ -270,7 +305,8 @@ func _build_howto() -> void:
 	box.add_child(head)
 	for i in Strings.HOWTO_LINES.size():
 		var l := P.label("%d. %s" % [i + 1, Strings.HOWTO_LINES[i]], 26, P.TEXT)
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		# Web 版は日本語の区切りの辞書を持たない(入れると約 4MB 増える)ので、どの字の間でも折る
+		l.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		l.custom_minimum_size = Vector2(540, 0)
 		box.add_child(l)
 	var close := P.button(Strings.CLOSE, P.ACCENT, 28, 76)

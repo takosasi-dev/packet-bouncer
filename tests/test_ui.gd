@@ -20,6 +20,7 @@ func _new_app() -> Control:
 	_root().get_node("Sfx").enabled = false  # 鳴らした音が残ると、終了処理で止まることがある
 	app.save = SaveStore.new(SAVE_PATH)
 	app.save.load_data()
+	app.save.tutorial_done = true  # はじめての案内(FR-23)は tests/test_learn.gd で確かめる。ここでは出さない
 	return app
 
 
