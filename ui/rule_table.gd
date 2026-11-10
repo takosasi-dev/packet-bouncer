@@ -25,7 +25,7 @@ func _ready() -> void:
 	var heads := [[COL_NO, Strings.COL_NO], [COL_ACTION, Strings.COL_ACTION], [COL_PROTO, Strings.COL_PROTO],
 		[COL_SRC, Strings.COL_SRC], [COL_PORT, Strings.COL_PORT]]
 	for h: Array in heads:
-		add_child(_cell(h[1], h[0], 0.0, HEADER_H, 20, P.DIM))
+		add_child(_cell(h[1], h[0], 0.0, HEADER_H, 22, P.DIM))
 
 
 static func cell_rect(col: Vector2, y: float, h: float) -> Rect2:

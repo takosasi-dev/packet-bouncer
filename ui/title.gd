@@ -86,7 +86,7 @@ func _daily_sub(date: String) -> String:
 func _big_button(text: String, sub: String, color: Color) -> Button:
 	var b := P.button(text, color, 44, 128)
 	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-	var s := P.label(sub, 20, Color(P.TEXT, 0.75))
+	var s := P.label(sub, 22, Color(P.TEXT, 0.75))
 	s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	s.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	s.offset_top = -36

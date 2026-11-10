@@ -15,6 +15,8 @@ config/version="0.1.0"
 run/main_scene="res://ui/app.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 run/flush_stdout_on_print=true
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.027, 0.043, 0.078, 1)
 
 [autoload]
 

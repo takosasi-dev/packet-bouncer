@@ -41,7 +41,7 @@ func _ready() -> void:
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(sub)
 
-	var cap := P.label(Strings.R_SCORE, 20, P.DIM)
+	var cap := P.label(Strings.R_SCORE, 22, P.DIM)
 	cap.position = Vector2(0, 168)
 	cap.size = Vector2(720, 28)
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -74,7 +74,7 @@ func _ready() -> void:
 		tile.size = Vector2(208, 92)
 		tile.add_theme_stylebox_override("panel", P.box(Color(P.PANEL, 0.85), P.LINE, 14, 1))
 		add_child(tile)
-		var t_cap := P.label(stats[i][0], 18, P.DIM)
+		var t_cap := P.label(stats[i][0], 22, P.DIM)
 		t_cap.position = Vector2(0, 8)
 		t_cap.size = Vector2(208, 26)
 		t_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -93,7 +93,7 @@ func _ready() -> void:
 	share.position = Vector2(28, 838)
 	share.size = Vector2(664, 150)
 	share.add_theme_font_override("font", P.mono())
-	share.add_theme_font_size_override("font_size", 18)
+	share.add_theme_font_size_override("font_size", 22)
 	share.add_theme_color_override("font_readonly_color", P.TEXT)
 	share.add_theme_stylebox_override("read_only", P.box(Color(P.BG, 0.9), P.LINE, 10, 1))
 	share.add_theme_stylebox_override("focus", P.box(Color(P.BG, 0.9), P.ACCENT, 10, 2))
@@ -107,9 +107,9 @@ func _ready() -> void:
 		_copy_note.text = Strings.COPY_TRIED
 		Sfx.play("correct"))
 	add_child(copy)
-	_copy_note = P.label("", 19, P.DIM)
+	_copy_note = P.label("", 22, P.DIM)
 	_copy_note.position = Vector2(28, 1072)
-	_copy_note.size = Vector2(664, 52)
+	_copy_note.size = Vector2(664, 62)
 	_copy_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_copy_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_copy_note)

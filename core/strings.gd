@@ -24,6 +24,7 @@ const HOWTO_LINES: Array[String] = [
 ]
 const CLOSE := "閉じる"
 const GEN_ERROR := "出題を作れませんでした(種: %d)"
+const ROTATE_HINT := "スマホは縦向きで遊んでください"
 
 # ルール表とカード
 const ALLOW := "通す"

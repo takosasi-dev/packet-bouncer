@@ -113,7 +113,7 @@ func _ready() -> void:
 		b.pivot_offset = b.size / 2.0
 		b.add_child(_shape_icon(b == _allow_btn))
 
-	var hint := P.label(Strings.SWIPE_HINT, 20, P.DIM)
+	var hint := P.label(Strings.SWIPE_HINT, 24, P.DIM)
 	hint.position = Vector2(0, 1172)
 	hint.size = Vector2(720, 30)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -162,7 +162,7 @@ func _build_hud() -> void:
 	_combo_label.size = Vector2(220, 36)
 	_combo_label.pivot_offset = Vector2(0, 18)
 	hud.add_child(_combo_label)
-	var score_cap := P.label(Strings.SCORE, 18, P.DIM)
+	var score_cap := P.label(Strings.SCORE, 22, P.DIM)
 	score_cap.position = Vector2(220, 8)
 	score_cap.size = Vector2(224, 24)
 	score_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -178,7 +178,7 @@ func _build_hud() -> void:
 	_mult_label.size = Vector2(70, 40)
 	_mult_label.pivot_offset = Vector2(35, 20)
 	hud.add_child(_mult_label)
-	var lives_cap := P.label(Strings.LIVES, 18, P.DIM)
+	var lives_cap := P.label(Strings.LIVES, 22, P.DIM)
 	lives_cap.position = Vector2(500, 8)
 	lives_cap.size = Vector2(144, 24)
 	lives_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -234,6 +234,8 @@ func _build_panel() -> void:
 
 
 func _process(delta: float) -> void:
+	if app.blocked():
+		return
 	rs.tick(delta)
 	if rs.phase == RunState.Phase.PANEL:
 		_panel_go.modulate.a = (0.55 + 0.45 * sin(rs.elapsed * 6.0)) if rs.panel_ready() else 0.0
@@ -269,7 +271,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _answer(action: String) -> void:
-	if _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
+	if app.blocked() or _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
 		return  # E-1・E-2
 	_answered_frame = Engine.get_process_frames()
 	rs.answer(action)
@@ -363,6 +365,7 @@ func _on_answered(result: Dictionary) -> void:
 		_lives.lives = rs.lives
 		_lives.hit = 1.0
 		Sfx.play("wrong")
+		app.vibrate(90)
 		app.shake(0.7)
 		app.glitch(1.0)
 		app.flash(P.DROP, 0.8)

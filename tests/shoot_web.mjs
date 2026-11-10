@@ -1,8 +1,8 @@
 // Web 書き出しを、窓なし・消音の Chrome と Edge(使い捨てのプロフィール)で開いて撮る(仕様書 §8.1・AC-3・AC-19〜21)。
 // URL を渡さなければ build/web を /packet-bouncer/ の下に置いて手元で配信する。--play を付けると、Chrome で 1 ラン遊んで各画面を撮る。
 // 起動したか・転送量(キャッシュ無効)・通信先のホスト・コンソールのエラーを出す。画像は build/web_shots/
-// --perfect は今日の検問を正しく答えて 80 枚を通し(1 回だけわざとミス)、README 用の画像を撮る(答えは tests/answer_key.mjs)。
-//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect]
+// --mobile はスマホのエミュレーション(タッチ)で遊んで撮る。--perfect は今日の検問を正しく答えて 80 枚を通し(1 回だけわざとミス)、README 用の画像を撮る(答えは tests/answer_key.mjs)。
+//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect | --mobile]
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,6 +25,7 @@ const BROWSERS = {
 };
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 540, height: 960 }; // 720 × 1280 の 0.75 倍
+const MOBILE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true }; // iPhone くらいの縦長
 const KEYS = {
 	Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
 	Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' },
@@ -175,6 +176,55 @@ async function perfectScenario(page, shot) {
 	await shot('sound_after_reload');
 }
 
+// スマホのエミュレーション(390 × 844、3 倍密度、タッチ)で、タップ・指でのスワイプ・2 本目の指・横向きを撮る
+async function mobileScenario(page, shot) {
+	const s = MOBILE.width / 720;
+	const top = (MOBILE.height - 1280 * s) / 2; // 縦に余る分は上下に分かれる(aspect expand)
+	const at = (x, y) => ({ x: x * s, y: top + y * s });
+	const touch = (type, points) => page.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+	const tap = async (x, y) => {
+		const p = at(x, y);
+		await touch('touchStart', [{ ...p, id: 0 }]);
+		await touch('touchEnd', []);
+	};
+	const { answers } = dailyAnswers(localDate());
+	await tap(360, 666); // 今日の検問
+	await sleep(1600);
+	await shot('m02_panel');
+	await tap(360, 900); // パネルを閉じる
+	await sleep(900);
+	await shot('m03_card');
+	// 1 枚目: 指で右へスワイプ。途中で 2 本目の指が左へ動いても、最初の指だけを追う(E-4)
+	const c = at(360, 765);
+	await touch('touchStart', [{ ...c, id: 0 }]);
+	for (let dx = 0; dx <= 120; dx += 20) await touch('touchMove', [{ x: c.x + dx * s, y: c.y, id: 0 }]);
+	await touch('touchStart', [{ x: c.x + 120 * s, y: c.y, id: 0 }, { x: c.x, y: c.y + 100, id: 1 }]);
+	for (let dx = 0; dx <= 300; dx += 50) await touch('touchMove', [{ x: c.x + (120 + dx * 0.3) * s, y: c.y, id: 0 }, { x: c.x - dx * s, y: c.y + 100, id: 1 }]);
+	await shot('m04_two_fingers');
+	await touch('touchEnd', [{ x: c.x + 210 * s, y: c.y, id: 0 }]);
+	await touch('touchEnd', []);
+	await sleep(answers[0][0].action === 'allow' ? 600 : 2200);
+	// 2〜10 枚目とステージ 2 の前半を、ボタンのタップで正しく答える
+	for (let k = 2; k <= 10; k++) {
+		await tap(answers[0][k - 1].action === 'allow' ? 533 : 187, 1094);
+		await sleep(500);
+	}
+	await sleep(1500);
+	await tap(360, 900);
+	await sleep(800);
+	for (let k = 1; k <= 6; k++) {
+		await tap(answers[1][k - 1].action === 'allow' ? 533 : 187, 1094);
+		await sleep(500);
+	}
+	await shot('m05_stage2');
+	await page.send('Emulation.setDeviceMetricsOverride', { width: MOBILE.height, height: MOBILE.width, deviceScaleFactor: MOBILE.deviceScaleFactor, mobile: true });
+	await sleep(1500);
+	await shot('m06_landscape');
+	await page.send('Emulation.setDeviceMetricsOverride', MOBILE);
+	await sleep(1500);
+	await shot('m07_back_portrait');
+}
+
 async function shoot(name, exe, url, play) {
 	const profile = mkdtempSync(path.join(tmpdir(), `pb-${name}-`));
 	const browser = spawn(exe, [
@@ -202,8 +252,12 @@ async function shoot(name, exe, url, play) {
 		for (const m of ['Runtime.enable', 'Log.enable', 'Page.enable', 'Network.enable']) await page.send(m);
 		await page.send('Network.setCacheDisabled', { cacheDisabled: true });
 		await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-		const view = play ? PHONE : DESKTOP;
-		await page.send('Emulation.setDeviceMetricsOverride', { ...view, deviceScaleFactor: 1, mobile: false });
+		if (play === 'mobile') {
+			await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+			await page.send('Emulation.setDeviceMetricsOverride', MOBILE);
+		} else {
+			await page.send('Emulation.setDeviceMetricsOverride', { ...(play ? PHONE : DESKTOP), deviceScaleFactor: 1, mobile: false });
+		}
 		await page.send('Page.navigate', { url });
 		const booted = await waitFor(() => logs.some((l) => l.text.startsWith('Godot Engine v')), BOOT_TIMEOUT_MS);
 		expect(booted !== null, `${name}: ${url} で Godot が起動した`);
@@ -218,6 +272,7 @@ async function shoot(name, exe, url, play) {
 		console.log(`    通信先: ${[...hosts].join(', ')}`);
 		if (play === 'play') await playScenario(page, shot);
 		else if (play === 'perfect') await perfectScenario(page, shot);
+		else if (play === 'mobile') await mobileScenario(page, shot);
 		const errors = logs.filter((l) => ['error', 'exception'].includes(l.level) && !l.text.includes('favicon.ico'));
 		errors.forEach((l) => console.log(`    [${l.level}] ${l.text}`));
 		expect(errors.length === 0, `${name}: コンソールにエラーが無い`);
@@ -234,8 +289,8 @@ async function shoot(name, exe, url, play) {
 async function main() {
 	rmSync(OUT, { recursive: true, force: true });
 	mkdirSync(OUT, { recursive: true });
-	const play = process.argv.includes('--play') ? 'play' : process.argv.includes('--perfect') ? 'perfect' : '';
-	if (play === 'perfect' && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
+	const play = ['play', 'perfect', 'mobile'].find((m) => process.argv.includes(`--${m}`)) ?? '';
+	if (['perfect', 'mobile'].includes(play) && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
 	let url = process.argv.slice(2).find((a) => !a.startsWith('--'));
 	let server = null;
 	let root = null;

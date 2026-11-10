@@ -1,5 +1,6 @@
 # 画面の土台: 背景のシェーダー、720 × 1280 の舞台(縦横比を保って中央。余白は背景で埋める。FR-19・E-12)、
 # 仕上げのシェーダー、タイトル・プレイ・結果の切り替え、保存、画面の揺れと色ずれの演出をまとめる。
+# スマホ(タッチ端末)では、横向きのときに縦向きの案内を出し、描画が重ければ仕上げのシェーダーを外す。
 extends Control
 
 const P := preload("res://ui/palette.gd")
@@ -13,6 +14,9 @@ const BASE_SIZE := Vector2(720, 1280)
 const SHAKE_DECAY := 6.0
 const GLITCH_DECAY := 3.5
 const FLASH_DECAY := 4.0
+const PERF_WINDOW_SEC := 4.0  # タッチ端末で描画の速さを測る長さ
+const PERF_MIN_FPS := 40.0  # これより遅ければ仕上げのシェーダーを外す
+const VIBRATE_MS := 90
 
 var save: RefCounted = SaveStore.new()
 var stage: Control  # 画面を置く 720 × 1280 の舞台
@@ -20,6 +24,11 @@ var _screen: Control
 var _bg: ColorRect
 var _bg_mat: ShaderMaterial
 var _crt_mat: ShaderMaterial
+var _crt: ColorRect
+var _rotate: Control
+var _touch := false
+var _perf_time := 0.0
+var _perf_frames := 0
 var _shake := 0.0
 var _glitch := 0.0
 var _flash := 0.0
@@ -48,13 +57,16 @@ func _ready() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 10
 	add_child(layer)
-	var crt := ColorRect.new()
-	crt.set_anchors_preset(Control.PRESET_FULL_RECT)
-	crt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crt = ColorRect.new()
+	_crt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_crt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_crt_mat = ShaderMaterial.new()
 	_crt_mat.shader = preload("res://ui/shaders/crt.gdshader")
-	crt.material = _crt_mat
-	layer.add_child(crt)
+	_crt.material = _crt_mat
+	layer.add_child(_crt)
+
+	_touch = DisplayServer.is_touchscreen_available()
+	_build_rotate_hint()
 
 	get_viewport().size_changed.connect(_layout)
 	_layout()
@@ -65,9 +77,11 @@ func _layout() -> void:
 	var view := get_viewport_rect().size
 	_bg_mat.set_shader_parameter("rect_size", view)
 	stage.position = ((view - BASE_SIZE) / 2.0).round()
+	_rotate.visible = _touch and view.x > view.y
 
 
 func _process(delta: float) -> void:
+	_measure(delta)
 	var d := minf(delta, 0.1)
 	_shake = maxf(_shake - d * SHAKE_DECAY, 0.0)
 	_glitch = maxf(_glitch - d * GLITCH_DECAY, 0.0)
@@ -79,6 +93,50 @@ func _process(delta: float) -> void:
 	_crt_mat.set_shader_parameter("glitch", _glitch)
 	_crt_mat.set_shader_parameter("flash", _flash)
 	_bg_mat.set_shader_parameter("flash", _bg_flash)
+
+
+# タッチ端末で最初の PERF_WINDOW_SEC 秒の速さを測り、遅ければ画面全体の仕上げ(画面の写しを読むシェーダー)を外す
+func _measure(delta: float) -> void:
+	if not _touch or _perf_time < 0.0:
+		return
+	_perf_time += delta
+	_perf_frames += 1
+	if _perf_time >= PERF_WINDOW_SEC:
+		if _perf_frames / _perf_time < PERF_MIN_FPS:
+			_crt.visible = false
+		_perf_time = -1.0  # 測るのは 1 回だけ
+
+
+func _build_rotate_hint() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 11
+	add_child(layer)
+	_rotate = Control.new()
+	_rotate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_rotate.mouse_filter = Control.MOUSE_FILTER_STOP
+	layer.add_child(_rotate)
+	var shade := ColorRect.new()
+	shade.color = Color(P.BG, 0.92)
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rotate.add_child(shade)
+	var l := P.label(preload("res://core/strings.gd").ROTATE_HINT, 64, P.TEXT, P.bold())
+	l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_rotate.add_child(l)
+	_rotate.visible = false
+
+
+# 横向きの案内を出している間は、ゲームの時間を止める(play.gd が見る)
+func blocked() -> bool:
+	return _rotate.visible
+
+
+# ミスのときの短い振動(音が入のときだけ。Web では navigator.vibrate で、対応していない端末では何も起きない)
+func vibrate(ms: int = VIBRATE_MS) -> void:
+	if _touch and save.sound_on:
+		Input.vibrate_handheld(ms)
 
 
 func _jitter_unit() -> float:

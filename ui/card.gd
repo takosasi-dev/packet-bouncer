@@ -47,7 +47,7 @@ func _ready() -> void:
 	_header.position = Vector2(26, 10)
 	_header.size = Vector2(320, 40)
 	add_child(_header)
-	_free = P.label(Strings.NO_LIMIT, 20, P.ALLOW)
+	_free = P.label(Strings.NO_LIMIT, 22, P.ALLOW)
 	_free.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_free.position = Vector2(340, 12)
 	_free.size = Vector2(size.x - 366, 36)
@@ -56,7 +56,7 @@ func _ready() -> void:
 	var names := [Strings.COL_PROTO, Strings.COL_SRC, Strings.COL_PORT]
 	for k in 3:
 		var col: Vector2 = cols[k]
-		var cap := P.label(names[k], 20, P.DIM)
+		var cap := P.label(names[k], 22, P.DIM)
 		cap.position = Vector2(col.x, 84)
 		cap.size = Vector2(col.y - col.x, 30)
 		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
