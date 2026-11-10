@@ -5,6 +5,7 @@ extends Control
 const P := preload("res://ui/palette.gd")
 const Strings := preload("res://core/strings.gd")
 const Rng := preload("res://core/rng.gd")
+const B := preload("res://core/balance.gd")
 
 var app: Control
 var message := ""  # E-13 などの知らせ
@@ -12,6 +13,8 @@ var _logo: Control
 var _ghosts: Array[Label] = []
 var _sound: Button
 var _effects: Button
+var _best: Label
+var _levels: Dictionary = {}  # 難易度 -> ボタン(FR-20)
 var _howto: Control
 var _time := 0.0
 var _started := false
@@ -30,7 +33,7 @@ func _ready() -> void:
 	var menu := VBoxContainer.new()
 	menu.position = Vector2(110, 580)
 	menu.size = Vector2(500, 0)
-	menu.add_theme_constant_override("separation", 22)
+	menu.add_theme_constant_override("separation", 16)
 	add_child(menu)
 
 	var date := Rng.today()
@@ -40,6 +43,14 @@ func _ready() -> void:
 	var random := _big_button(Strings.RANDOM, Strings.RANDOM_SUB, P.ACCENT)
 	random.pressed.connect(_go.bind("random"))
 	menu.add_child(random)
+
+	var levels := HBoxContainer.new()
+	levels.add_theme_constant_override("separation", 14)
+	menu.add_child(levels)
+	for l: String in B.LEVELS:
+		var lb := _level_button(l)
+		levels.add_child(lb)
+		_levels[l] = lb
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
@@ -58,22 +69,24 @@ func _ready() -> void:
 	row.add_child(howto)
 	_update_sound()
 
-	var best := P.label(Strings.BEST % app.save.best_score, 30, P.TEXT, P.mono())
+	var best := P.label("", 30, P.TEXT, P.mono())
 	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	best.position = Vector2(0, 1110)
+	best.position = Vector2(0, 1150)
 	best.size = Vector2(720, 44)
 	add_child(best)
+	_best = best
+	_update_level()
 
 	if message != "":
 		var note := P.label(message, 24, P.WARN)
 		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		note.position = Vector2(0, 1160)
+		note.position = Vector2(0, 1190)
 		note.size = Vector2(720, 40)
 		add_child(note)
 
 	var version := P.label(Strings.VERSION_FORMAT % ProjectSettings.get_setting("application/config/version"), 22, P.DIM, P.mono())
 	version.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	version.position = Vector2(0, 1220)
+	version.position = Vector2(0, 1232)
 	version.size = Vector2(690, 30)
 	add_child(version)
 
@@ -103,6 +116,47 @@ func _big_button(text: String, sub: String, color: Color) -> Button:
 	for state: String in ["normal", "hover", "focus", "pressed", "disabled"]:
 		(b.get_theme_stylebox(state) as StyleBoxFlat).content_margin_bottom = 40  # 見出しを上に寄せ、下に説明を置く
 	return b
+
+
+const LEVEL_COLORS := {"easy": P.ALLOW, "normal": P.ACCENT, "hard": P.DROP}
+
+
+func _level_button(level: String) -> Button:
+	var color: Color = LEVEL_COLORS[level]
+	var b := P.button(Strings.LEVEL_NAMES[level], color, 26, 84)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var s := P.label(Strings.LEVEL_SUBS[level], 17, Color(P.TEXT, 0.7))
+	s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	s.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	s.offset_top = -30
+	s.offset_bottom = -6
+	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(s)
+	b.set_meta("base_normal", b.get_theme_stylebox("normal"))
+	for state: String in ["normal", "hover", "focus", "pressed"]:
+		(b.get_theme_stylebox(state) as StyleBoxFlat).content_margin_bottom = 26
+	b.pressed.connect(_pick_level.bind(level))
+	return b
+
+
+func _pick_level(level: String) -> void:
+	app.save.set_level(level)
+	_update_level()
+	Sfx.play("correct")
+
+
+# 選んでいる難易度だけ塗り、ほかは暗くする。自己ベストはその難易度の物を出す
+func _update_level() -> void:
+	for l: String in _levels:
+		var b: Button = _levels[l]
+		var on: bool = l == app.save.level
+		var color: Color = LEVEL_COLORS[l]
+		var sb: StyleBoxFlat = P.box(Color(color, 0.30), color, 18, 3, 14) if on else b.get_meta("base_normal")
+		sb.content_margin_bottom = 26
+		b.add_theme_stylebox_override("normal", sb)
+		b.modulate = Color.WHITE if on else Color(1, 1, 1, 0.55)
+	var best: int = app.save.best_for(app.save.level)
+	_best.text = "%s  %s" % [Strings.level_name(app.save.level), Strings.BEST % best]
 
 
 func _build_logo() -> void:

@@ -12,12 +12,20 @@ signal card_shown(packet: RefCounted)
 signal answered(result: Dictionary)  # {correct, timeout, given, expected, rule_index, gained, multiplier}
 signal time_warned
 signal ended
+signal skill_used(skill: String)
 
 enum Phase { IDLE, PANEL, CARD, FEEDBACK, ENDED }
 
 var phase := Phase.IDLE
 var mode := ""  # "daily" / "random"
+var level := "normal"  # 難易度(FR-20)
+var max_lives := B.LIVES
 var date := ""  # 日替わりの日付(開始時の物のまま。E-7)
+var charges: Dictionary = {}  # 技 -> 残りの回数(FR-21)
+var skills_used := 0
+var frozen := false  # 今のカードの制限時間を止めている
+var scanned := false  # 今のカードで解析を使った
+var shield_on := false  # 次のミスでライフが減らない
 var run_seed := 0
 var run: Dictionary = {}
 var stage_index := 0  # 0 始まり
@@ -37,7 +45,7 @@ var _warned := false
 
 
 # 成功で "" を、生成に失敗したら(E-13)エラーの文を返す
-func start(p_seed: int, p_mode: String, p_date: String = "") -> String:
+func start(p_seed: int, p_mode: String, p_date: String = "", p_level: String = "normal") -> String:
 	var made := Generator.generate_run(p_seed)
 	if made.has("error"):
 		phase = Phase.IDLE
@@ -46,9 +54,14 @@ func start(p_seed: int, p_mode: String, p_date: String = "") -> String:
 	run_seed = p_seed
 	mode = p_mode
 	date = p_date
+	level = p_level if p_level in B.LEVELS else "normal"
+	max_lives = B.LEVEL_LIVES[level]
+	charges = B.SKILL_CHARGES.duplicate()
+	skills_used = 0
+	shield_on = false
 	stage_index = 0
 	score = 0
-	lives = B.LIVES
+	lives = max_lives
 	streak = 0
 	max_streak = 0
 	correct = 0
@@ -114,13 +127,55 @@ func tick(delta: float) -> void:
 			if _feedback_left <= 0.0:
 				_advance()
 		Phase.CARD:
-			if time_limit > 0.0:
+			if time_limit > 0.0 and not frozen:
 				time_left = maxf(time_left - d, 0.0)
 				if not _warned and time_left < time_limit * B.WARN_RATIO:
 					_warned = true
 					time_warned.emit()
 				if time_left <= 0.0:
 					_resolve("", true)
+
+
+# 技を使えるか(FR-21)。凍結は制限時間のあるカードだけ、凍結と解析は 1 枚に 1 回、防壁は張っていない間
+func can_use(skill: String) -> bool:
+	if int(charges.get(skill, 0)) <= 0 or phase == Phase.ENDED or phase == Phase.IDLE:
+		return false
+	match skill:
+		"freeze":
+			return phase == Phase.CARD and time_limit > 0.0 and not frozen
+		"scan":
+			return phase == Phase.CARD and not scanned
+		"shield":
+			return not shield_on
+	return false
+
+
+func use_skill(skill: String) -> bool:
+	if not can_use(skill):
+		return false
+	charges[skill] -= 1
+	skills_used += 1
+	match skill:
+		"freeze":
+			frozen = true
+		"scan":
+			scanned = true
+		"shield":
+			shield_on = true
+	skill_used.emit(skill)
+	return true
+
+
+# 今のカードの決め手の行(-1 は既定の行)
+func deciding_row() -> int:
+	return Evaluator.evaluate(rules(), current_card())["rule_index"]
+
+
+static func rank_for(correct_count: int) -> String:
+	for r: Array in B.RANKS:
+		if correct_count >= int(r[0]):
+			return str(r[1])
+	return "D"
 
 
 static func multiplier_for(streak_before: int) -> int:
@@ -143,9 +198,11 @@ func _begin_stage() -> void:
 
 func _show_card() -> void:
 	phase = Phase.CARD
-	time_limit = 0.0 if card_index < B.FREE_CARDS else B.TIME_LIMIT_SEC[stage_index]
+	time_limit = 0.0 if card_index < B.FREE_CARDS else B.TIME_LIMIT_SEC[stage_index] * B.LEVEL_TIME_SCALE[level]
 	time_left = time_limit
 	_warned = false
+	frozen = false
+	scanned = false
 	card_shown.emit(current_card())
 
 
@@ -154,7 +211,7 @@ func _resolve(given: String, timeout: bool) -> Dictionary:
 	var ok: bool = not timeout and given == verdict["action"]
 	var result := {
 		"correct": ok, "timeout": timeout, "given": given, "expected": verdict["action"],
-		"rule_index": verdict["rule_index"], "gained": 0, "multiplier": multiplier(),
+		"rule_index": verdict["rule_index"], "gained": 0, "multiplier": multiplier(), "shielded": false,
 	}
 	var row := grid[stage_index]
 	if ok:
@@ -167,7 +224,11 @@ func _resolve(given: String, timeout: bool) -> Dictionary:
 		answered.emit(result)
 		_advance()
 	else:
-		lives -= 1
+		if shield_on:  # 防壁: ライフは減らないが、連続正解は 0・格子は x(FR-21)
+			shield_on = false
+			result["shielded"] = true
+		else:
+			lives -= 1
 		streak = 0
 		grid[stage_index] = row.substr(0, card_index) + "x" + row.substr(card_index + 1)
 		phase = Phase.FEEDBACK

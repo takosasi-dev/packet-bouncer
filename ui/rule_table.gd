@@ -119,12 +119,12 @@ func _row(index: int, number: String, action: String, cells: Array, is_new: bool
 
 
 # 決め手の行を光らせる(-1 は既定の行)。ほかの行は暗くする
-func highlight(rule_index: int) -> void:
+func highlight(rule_index: int, color: Color = P.WARN) -> void:
 	clear_highlight()
 	var target: Panel = _rows[rule_index] if rule_index >= 0 else _rows.back()
 	for r in _rows:
 		r.modulate = Color(1, 1, 1, 0.35) if r != target else Color.WHITE
-	var sb := P.box(Color(P.WARN, 0.16), P.WARN, 10, 4, 18)
+	var sb := P.box(Color(color, 0.16), color, 10, 4, 18)
 	target.add_theme_stylebox_override("panel", sb)
 	target.pivot_offset = target.size / 2.0
 	_pulse = target.create_tween().set_loops()

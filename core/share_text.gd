@@ -7,14 +7,18 @@ const Strings := preload("res://core/strings.gd")
 
 
 static func build(mode: String, date: String, attempts_before: int, score: int, correct: int, total: int,
-		stage: int, grid: Array, share_url: String = B.SHARE_URL) -> String:
+		stage: int, grid: Array, share_url: String = B.SHARE_URL, level: String = "normal", skills_used: int = 0) -> String:
 	var lines: Array[String] = []
 	if mode == "daily":
 		var nth := Strings.SHARE_FIRST if attempts_before == 0 else Strings.SHARE_NTH % (attempts_before + 1)
 		lines.append("%s %s %s" % [Strings.PRODUCT, date, nth])
 	else:
 		lines.append("%s %s" % [Strings.PRODUCT, Strings.SHARE_RANDOM])
+	if level != "normal":  # FR-22: ふつうで技なしなら §9.9 の形のまま
+		lines[0] += " " + Strings.level_name(level)
 	lines.append(Strings.SHARE_SUMMARY % [score, correct, total, stage])
+	if skills_used > 0:
+		lines[1] += Strings.SHARE_SKILLS % skills_used
 	for row: String in grid:
 		lines.append(row)
 	if share_url != "":

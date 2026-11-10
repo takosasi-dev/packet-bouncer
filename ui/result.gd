@@ -7,6 +7,7 @@ const P := preload("res://ui/palette.gd")
 const B := preload("res://core/balance.gd")
 const Strings := preload("res://core/strings.gd")
 const ShareText := preload("res://core/share_text.gd")
+const RunState := preload("res://core/run_state.gd")
 
 const CELL := 40.0
 const CELL_GAP := 5.0
@@ -35,7 +36,8 @@ func _ready() -> void:
 		mode_text = "%s %s" % [rs.date, Strings.SHARE_FIRST if attempts_before == 0 else Strings.SHARE_NTH % (attempts_before + 1)]
 	else:
 		mode_text = Strings.SHARE_RANDOM
-	var sub := P.label("%s  /  %s" % [sub_text, mode_text], 24, P.WARN if lives_out else P.ALLOW)
+	mode_text += "  " + Strings.level_name(rs.level)
+	var sub :=P.label("%s  /  %s" % [sub_text, mode_text], 24, P.WARN if lives_out else P.ALLOW)
 	sub.position = Vector2(0, 118)
 	sub.size = Vector2(720, 36)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -53,7 +55,7 @@ func _ready() -> void:
 	_score_label.pivot_offset = Vector2(360, 60)
 	add_child(_score_label)
 	var best_text: String = (Strings.NEW_BEST + "  ") if new_best else ""
-	var best := P.label(best_text + Strings.BEST % app.save.best_score, 24, P.NEW_ROW if new_best else P.DIM, P.mono())
+	var best := P.label(best_text + Strings.BEST % app.save.best_for(rs.level), 24, P.NEW_ROW if new_best else P.DIM, P.mono())
 	best.position = Vector2(0, 306)
 	best.size = Vector2(720, 34)
 	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -88,7 +90,7 @@ func _ready() -> void:
 	_build_grid(Vector2((720 - (CELL * B.CARDS_PER_STAGE + CELL_GAP * (B.CARDS_PER_STAGE - 1))) / 2.0, 464))
 
 	var share := TextEdit.new()
-	share.text = ShareText.build(rs.mode, rs.date, attempts_before, rs.score, rs.correct, rs.total_cards(), rs.stage(), rs.grid)
+	share.text = ShareText.build(rs.mode, rs.date, attempts_before, rs.score, rs.correct, rs.total_cards(), rs.stage(), rs.grid, B.SHARE_URL, rs.level, rs.skills_used)
 	share.editable = false  # 選んでコピーはできる(E-11)
 	share.position = Vector2(28, 838)
 	share.size = Vector2(664, 150)
@@ -134,6 +136,7 @@ func _ready() -> void:
 	to_title.pressed.connect(_leave.bind(false))
 	add_child(to_title)
 	retry.grab_focus.call_deferred()
+	_build_rank()
 	Sfx.play("result")
 	if new_best:
 		app.flash(P.NEW_ROW, 0.7)
@@ -163,6 +166,43 @@ func _build_grid(origin: Vector2) -> void:
 			t.tween_interval(0.25 + (s * row.length() + k) * 0.012)
 			t.tween_property(cell, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			_cells.append(cell)
+
+
+const RANK_COLORS := {"S": P.NEW_ROW, "A": P.ALLOW, "B": P.ACCENT, "C": P.WARN, "D": P.DROP}
+const RANK_DELAY := 1.1  # 得点の数え上げが終わる頃に押す
+
+
+# 得点の右にランクの判子を押す
+func _build_rank() -> void:
+	var rank: String = RunState.rank_for(rs.correct)
+	var color: Color = RANK_COLORS.get(rank, P.DROP)
+	var stamp := Panel.new()
+	stamp.position = Vector2(566, 176)
+	stamp.size = Vector2(124, 124)
+	stamp.pivot_offset = stamp.size / 2.0
+	stamp.rotation_degrees = -12.0
+	stamp.add_theme_stylebox_override("panel", P.box(Color(color, 0.14), color, 18, 4, 18))
+	add_child(stamp)
+	var letter := P.label(rank, 76, color, P.mono_bold())
+	letter.size = Vector2(124, 96)
+	letter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	stamp.add_child(letter)
+	var cap := P.label(Strings.RANK, 18, color)
+	cap.position = Vector2(0, 88)
+	cap.size = Vector2(124, 28)
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stamp.add_child(cap)
+	stamp.modulate.a = 0.0
+	stamp.scale = Vector2(2.6, 2.6)
+	var t := stamp.create_tween()
+	t.tween_interval(RANK_DELAY)
+	t.tween_callback(func() -> void: Sfx.play("rule_update" if rank == "S" else "correct"))
+	t.parallel().tween_property(stamp, "modulate:a", 1.0, 0.12)
+	t.parallel().tween_property(stamp, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_callback(func() -> void:
+		app.shake(0.35)
+		app.flash(color, 0.4))
 
 
 func _process(delta: float) -> void:

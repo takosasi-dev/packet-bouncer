@@ -124,6 +124,84 @@ func test_missing_sfx_does_not_crash() -> bool:
 	return true
 
 
+func _key(play: Control, keycode: Key) -> void:
+	var e := InputEventKey.new()
+	e.keycode = keycode
+	e.pressed = true
+	play._unhandled_input(e)
+
+
+# FR-20・FR-21: タイトルで難易度を選ぶとライフが変わり、もう一度でも引き継ぐ。1・2・3 キーで技を使う
+func test_level_pick_and_skill_keys() -> bool:
+	var app := _new_app()
+	app.show_title()
+	var title := _screen(app)
+	title._pick_level("easy")
+	expect_eq(app.save.level, "easy", "難易度を保存")
+	expect(title._best.text.begins_with("やさしい"), "自己ベストの欄に難易度: " + title._best.text)
+	app.start_random()
+	var play := _screen(app)
+	var rs: RefCounted = play.rs
+	expect_eq(rs.lives, B.LEVEL_LIVES["easy"], "やさしいのライフ")
+	expect_eq(play._lives.total, B.LEVEL_LIVES["easy"], "ライフの印の数")
+	while not rs.panel_ready():
+		rs.tick(B.MAX_DELTA)
+	play._dismiss_panel()
+	_key(play, KEY_2)
+	expect(rs.scanned and rs.charges["scan"] == B.SKILL_CHARGES["scan"] - 1, "2 キーで解析")
+	_key(play, KEY_3)
+	expect(rs.shield_on, "3 キーで防壁")
+	play._process(0.016)
+	expect(play._skill_btns["shield"].disabled, "防壁を張った後もボタンが押せる")
+	expect(play._skill_btns["freeze"].disabled, "制限時間なしのカードで凍結のボタンが押せる")
+	_key(play, KEY_1)
+	expect(not rs.frozen, "制限時間なしのカードで 1 キーの凍結が効いた")
+	_play_through(play, 0)
+	app.finish_run(rs)
+	var result := _screen(app)
+	var share := result.get_children().filter(func(n: Node) -> bool: return n is TextEdit)
+	expect(share.size() == 1 and share[0].text.split("\n")[0].ends_with("やさしい") and share[0].text.contains("/ 技 2回"), "共有テキストに難易度と技")
+	expect_eq(app.save.best_for("easy"), rs.score, "やさしいの自己ベスト")
+	app.save.set_level("hard")  # 保存の設定を変えても、もう一度はそのランの難易度
+	result._leave(true)
+	expect_eq(_screen(app).rs.level, "easy", "もう一度で難易度を引き継ぐ")
+	app.queue_free()
+	DirAccess.remove_absolute(SAVE_PATH)
+	return true
+
+
+# 一時停止: 時間が止まり、答えも技も受けない。窓から離れると自動で止まる。Space で再開
+func test_pause() -> bool:
+	var app := _new_app()
+	app.start_daily()
+	var play := _screen(app)
+	var rs: RefCounted = play.rs
+	while not rs.panel_ready():
+		rs.tick(B.MAX_DELTA)
+	play._dismiss_panel()
+	for _i in B.FREE_CARDS:
+		play._answered_frame = -1
+		play._answer(Evaluator.evaluate(rs.rules(), rs.current_card())["action"])
+	_key(play, KEY_ESCAPE)
+	expect(play.is_paused(), "Esc で一時停止")
+	var left: float = rs.time_left
+	for _i in 100:
+		play._process(B.MAX_DELTA)
+	expect_eq(rs.time_left, left, "一時停止中に時間が進んだ")
+	var card_before: int = rs.card_index
+	play._answered_frame = -1
+	play._answer("allow")
+	_key(play, KEY_2)
+	expect(rs.card_index == card_before and not rs.scanned, "一時停止中に答えか技を受けた")
+	_key(play, KEY_SPACE)
+	expect(not play.is_paused(), "Space で再開")
+	play._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	expect(play.is_paused(), "窓から離れると一時停止")
+	app.queue_free()
+	DirAccess.remove_absolute(SAVE_PATH)
+	return true
+
+
 # 「演出 弱」: 保存され、揺れと色ずれが起きない(依頼者の追加 2026-11-10)
 func test_effects_low_stops_shake_and_glitch() -> bool:
 	var app := _new_app()

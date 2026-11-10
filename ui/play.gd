@@ -16,7 +16,11 @@ const CARD_Y := 640.0
 const BAR_Y := 906.0
 const REASON_Y := 930.0
 const BUTTONS_Y := 1036.0
+const SKILLS_Y := 1164.0
+const SKILL_H := 70.0
 const END_DELAY := 0.9
+const FROZEN := Color("7fdcff")  # 凍結の色
+const SKILL_COLORS := {"freeze": FROZEN, "scan": P.ACCENT, "shield": P.NEW_ROW}
 
 var app: Control
 var rs: RefCounted
@@ -37,6 +41,11 @@ var _panel_go: Label
 var _panel_title: Label
 var _panel_stage: Label
 var _panel_hint: Label
+var _skill_btns: Dictionary = {}  # 技 -> ボタン(FR-21)
+var _pause: Control  # 一時停止の画面(依頼者の追加 2026-11-10)
+var _glow: ColorRect  # 最大倍率の間、画面の縁を光らせる
+var _glow_mat: ShaderMaterial
+var _fever := false
 var _answered_frame := -1
 var _shown_score := 0.0
 var _ending := false
@@ -47,13 +56,17 @@ class LifeIcons extends Control:
 	var lives := 3
 	var total := 3
 	var hit := 0.0  # 減った直後の光
+	var shield := 0.0  # 防壁を張っている間の光(0〜1)
 
 	func _draw() -> void:
+		# 3 個までは今の大きさ、それより多ければ詰めて枠からはみ出さないようにする
+		var step := 46.0 if total <= 3 else 30.0
+		var radius := 17.0 if total <= 3 else 13.0
 		for i in total:
-			var c := Vector2(size.x - 26.0 - i * 46.0, size.y / 2.0)
+			var c := Vector2(size.x - 26.0 - i * step, size.y / 2.0)
 			var pts := PackedVector2Array()
 			for k in 6:
-				pts.append(c + Vector2.from_angle(PI / 6.0 + k * PI / 3.0) * 17.0)
+				pts.append(c + Vector2.from_angle(PI / 6.0 + k * PI / 3.0) * radius)
 			var alive := (total - 1 - i) < lives
 			if alive:
 				draw_colored_polygon(pts, Color(P.ALLOW, 0.85))
@@ -64,6 +77,11 @@ class LifeIcons extends Control:
 				draw_polyline(pts, Color(P.DROP, 0.5 + hit * 0.5), 2.0, true)
 				draw_line(c + Vector2(-8, -8), c + Vector2(8, 8), Color(P.DROP, 0.7), 3.0, true)
 				draw_line(c + Vector2(-8, 8), c + Vector2(8, -8), Color(P.DROP, 0.7), 3.0, true)
+		if shield > 0.0:  # 防壁: ライフの列を囲む光の枠
+			var left := size.x - 26.0 - (total - 1) * step - radius - 8.0
+			var r := Rect2(left, 4.0, size.x - left - 2.0, size.y - 8.0)
+			draw_rect(r, Color(P.NEW_ROW, 0.12 * shield), true)
+			draw_rect(r, Color(P.NEW_ROW, shield), false, 2.0, true)
 
 
 func _ready() -> void:
@@ -113,13 +131,51 @@ func _ready() -> void:
 		b.pivot_offset = b.size / 2.0
 		b.add_child(_shape_icon(b == _allow_btn))
 
-	var hint := P.label(Strings.SWIPE_HINT, 24, P.DIM)
-	hint.position = Vector2(0, 1172)
-	hint.size = Vector2(720, 30)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var skill_w := (RuleTable.WIDTH - 28.0) / B.SKILLS.size()
+	for i in B.SKILLS.size():
+		var skill: String = B.SKILLS[i]
+		var sb := P.button("", SKILL_COLORS[skill], 24, int(SKILL_H))
+		sb.position = Vector2(MARGIN + i * (skill_w + 14.0), SKILLS_Y)
+		sb.size = Vector2(skill_w, SKILL_H)
+		sb.focus_mode = Control.FOCUS_NONE
+		sb.pivot_offset = sb.size / 2.0
+		var sub := P.label(Strings.SKILL_SUBS[skill], 16, Color(P.TEXT, 0.7))
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sub.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		sub.offset_top = -26
+		sub.offset_bottom = -5
+		sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sb.add_child(sub)
+		for state: String in ["normal", "hover", "focus", "pressed", "disabled"]:
+			(sb.get_theme_stylebox(state) as StyleBoxFlat).content_margin_bottom = 22
+		sb.pressed.connect(_use_skill.bind(skill))
+		add_child(sb)
+		_skill_btns[skill] = sb
+
+	var hint := P.label(Strings.SWIPE_HINT, 20, P.DIM)
+	hint.position = Vector2(MARGIN, SKILLS_Y + SKILL_H + 8.0)
+	hint.size = Vector2(500, 28)
 	add_child(hint)
+	var pause_btn := P.button(Strings.PAUSE_BTN, P.DIM, 20, 34)
+	pause_btn.position = Vector2(720 - MARGIN - 150, SKILLS_Y + SKILL_H + 4.0)
+	pause_btn.size = Vector2(150, 34)
+	pause_btn.focus_mode = Control.FOCUS_NONE
+	pause_btn.pressed.connect(_set_paused.bind(true))
+	add_child(pause_btn)
+
+	_glow = ColorRect.new()
+	_glow.size = Vector2(720, 1280)
+	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_glow_mat = ShaderMaterial.new()
+	_glow_mat.shader = preload("res://ui/shaders/edge_glow.gdshader")
+	_glow_mat.set_shader_parameter("glow_color", P.NEW_ROW)
+	_glow_mat.set_shader_parameter("strength", 0.0)
+	_glow.material = _glow_mat
+	add_child(_glow)
 
 	_build_panel()
+	_build_pause()
+	rs.skill_used.connect(_on_skill_used)
 	rs.stage_started.connect(_on_stage_started)
 	rs.card_shown.connect(_on_card_shown)
 	rs.answered.connect(_on_answered)
@@ -186,7 +242,8 @@ func _build_hud() -> void:
 	_lives = LifeIcons.new()
 	_lives.position = Vector2(500, 38)
 	_lives.size = Vector2(150, 56)
-	_lives.total = B.LIVES
+	_lives.total = rs.max_lives
+	_lives.lives = rs.lives
 	hud.add_child(_lives)
 
 
@@ -234,7 +291,7 @@ func _build_panel() -> void:
 
 
 func _process(delta: float) -> void:
-	if app.blocked():
+	if app.blocked() or is_paused():
 		return
 	rs.tick(delta)
 	if rs.phase == RunState.Phase.PANEL:
@@ -245,18 +302,33 @@ func _process(delta: float) -> void:
 		var ratio: float = rs.time_left / rs.time_limit
 		_bar_fill.size.x = RuleTable.WIDTH * ratio
 		var col := P.ALLOW.lerp(P.WARN, clampf((0.6 - ratio) / 0.35, 0.0, 1.0))
-		if ratio < B.WARN_RATIO:
+		if rs.frozen:
+			col = FROZEN.lerp(P.TEXT, 0.25 + 0.25 * sin(rs.elapsed * 4.0))
+		elif ratio < B.WARN_RATIO:
 			col = P.DROP.lerp(P.WARN, 0.5 + 0.5 * sin(rs.elapsed * 30.0))
 		_bar_fill.color = col
+	_update_skills()
 	# 得点は数え上げる
 	_shown_score = move_toward(_shown_score, rs.score, maxf(40.0, absf(rs.score - _shown_score) * 8.0) * delta)
 	_score_label.text = str(int(round(_shown_score)))
+	var was_lit := _lives.hit > 0.0 or _lives.shield > 0.0
 	_lives.hit = maxf(_lives.hit - delta * 2.0, 0.0)
-	_lives.queue_redraw()
+	_update_skills()
+	if was_lit or _lives.hit > 0.0 or _lives.shield > 0.0:  # 光が動く間だけ描き直す
+		_lives.queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:  # E-3
+		return
+	if event.keycode in [KEY_ESCAPE, KEY_P]:
+		_set_paused(not is_paused())
+		get_viewport().set_input_as_handled()
+		return
+	if is_paused():
+		if event.keycode in [KEY_SPACE, KEY_ENTER, KEY_KP_ENTER]:
+			_set_paused(false)
+		get_viewport().set_input_as_handled()
 		return
 	match event.keycode:
 		KEY_LEFT, KEY_A:
@@ -265,16 +337,128 @@ func _unhandled_input(event: InputEvent) -> void:
 			_answer("allow")
 		KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
 			_dismiss_panel()
+		KEY_1, KEY_KP_1:
+			_use_skill("freeze")
+		KEY_2, KEY_KP_2:
+			_use_skill("scan")
+		KEY_3, KEY_KP_3:
+			_use_skill("shield")
 		_:
 			return
 	get_viewport().set_input_as_handled()
 
 
 func _answer(action: String) -> void:
-	if app.blocked() or _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
+	if app.blocked() or is_paused() or _ending or rs.phase != RunState.Phase.CARD or _answered_frame == Engine.get_process_frames():
 		return  # E-1・E-2
 	_answered_frame = Engine.get_process_frames()
 	rs.answer(action)
+
+
+func _use_skill(skill: String) -> void:
+	if app.blocked() or is_paused() or _ending:
+		return
+	rs.use_skill(skill)  # 使えないときは何もしない
+
+
+func is_paused() -> bool:
+	return _pause != null and _pause.visible
+
+
+# 一時停止: 時間を止め、表とカードを隠す(止めて読む抜け道にしない)。終わりかけと結果の前は受けない
+func _set_paused(on: bool) -> void:
+	if on and (_ending or rs.phase == RunState.Phase.ENDED):
+		return
+	if on == is_paused():
+		return
+	_pause.visible = on
+	_card.release_drag()
+	if on:
+		_pause.modulate.a = 0.0
+		_pause.create_tween().tween_property(_pause, "modulate:a", 1.0, 0.15)
+		(_pause.get_meta("resume") as Button).grab_focus()
+	Sfx.play("warn" if on else "correct")
+
+
+func _build_pause() -> void:
+	_pause = Control.new()
+	_pause.size = Vector2(720, 1280)
+	_pause.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause.visible = false
+	add_child(_pause)
+	var shade := ColorRect.new()
+	shade.color = P.BG  # 表とカードを見せない
+	shade.size = _pause.size
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause.add_child(shade)
+	var head := P.label(Strings.PAUSED, 72, P.ACCENT, P.bold())
+	head.position = Vector2(0, 380)
+	head.size = Vector2(720, 100)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pause.add_child(head)
+	var box := VBoxContainer.new()
+	box.position = Vector2(160, 540)
+	box.size = Vector2(400, 0)
+	box.add_theme_constant_override("separation", 22)
+	_pause.add_child(box)
+	var resume := P.button(Strings.RESUME, P.ALLOW, 34, 96)
+	resume.pressed.connect(_set_paused.bind(false))
+	box.add_child(resume)
+	_pause.set_meta("resume", resume)
+	var restart := P.button(Strings.RESTART, P.ACCENT, 30, 84)
+	restart.pressed.connect(func() -> void:
+		if not _ending:
+			_ending = true
+			app.retry(rs))  # 途中でやめたランは数えない(§9.8)
+	box.add_child(restart)
+	var quit := P.button(Strings.TO_TITLE, P.DIM, 30, 84)
+	quit.pressed.connect(func() -> void:
+		if not _ending:
+			_ending = true
+			app.show_title())
+	box.add_child(quit)
+	var keys := P.label(Strings.PAUSE_KEYS, 22, P.DIM)
+	keys.position = Vector2(0, 900)
+	keys.size = Vector2(720, 30)
+	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pause.add_child(keys)
+
+
+# タブを切り替えた・アプリから離れたら、自動で一時停止する(戻った瞬間に時間切れにしない)
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if rs != null and _pause != null and rs.phase in [RunState.Phase.CARD, RunState.Phase.PANEL]:
+			_set_paused(true)
+
+
+# 残りの回数と、今使えるかをボタンに映す(変わったときだけ書き換える)
+func _update_skills() -> void:
+	for i in B.SKILLS.size():
+		var skill: String = B.SKILLS[i]
+		var b: Button = _skill_btns[skill]
+		var text: String = Strings.SKILL_BUTTON % [i + 1, Strings.SKILL_NAMES[skill], rs.charges.get(skill, 0)]
+		if b.text != text:
+			b.text = text
+		b.disabled = not rs.can_use(skill)
+	var lit: Button = _skill_btns["shield"]
+	lit.modulate = Color(1.5, 1.4, 1.0) if rs.shield_on else Color.WHITE
+	_lives.shield = (0.6 + 0.4 * sin(rs.elapsed * 5.0)) if rs.shield_on else 0.0
+
+
+func _on_skill_used(skill: String) -> void:
+	var b: Button = _skill_btns[skill]
+	_pop(b)
+	var color: Color = SKILL_COLORS[skill]
+	_float_text(Strings.SKILL_NAMES[skill], color, b.position + Vector2(b.size.x / 2.0, -10.0))
+	Sfx.play("skill")
+	app.flash(color, 0.45)
+	match skill:
+		"freeze":  # 色だけ変える(透明度はカードの出入りの動きが使う)
+			_card.modulate = Color(0.75, 0.95, 1.25, _card.modulate.a)
+		"scan":
+			_table.highlight(rs.deciding_row(), P.ACCENT)
+		"shield":
+			_float_text(Strings.SHIELD_ON, P.NEW_ROW, Vector2(560, 120))
 
 
 func _dismiss_panel() -> void:
@@ -307,6 +491,7 @@ func _on_stage_started(stage: int) -> void:
 
 func _on_card_shown(packet: RefCounted) -> void:
 	_table.clear_highlight()
+	_card.modulate = Color(1, 1, 1, _card.modulate.a)
 	_reason.text = ""
 	for b: Button in [_drop_btn, _allow_btn]:
 		b.modulate = Color.WHITE
@@ -363,18 +548,38 @@ func _on_answered(result: Dictionary) -> void:
 		t.tween_property(right_btn, "scale", Vector2.ONE, 0.12)
 		(_drop_btn if right_btn == _allow_btn else _allow_btn).modulate = Color(1, 1, 1, 0.35)
 		_lives.lives = rs.lives
-		_lives.hit = 1.0
 		Sfx.play("wrong")
-		app.vibrate(90)
-		app.shake(0.7)
-		app.glitch(1.0)
-		app.flash(P.DROP, 0.8)
+		if result["shielded"]:  # 防壁が受けた: 揺れは小さく、ライフは光らせない
+			_float_text(Strings.SHIELD_SAVED, P.NEW_ROW, Vector2(500, 120))
+			app.shake(0.3)
+			app.flash(P.NEW_ROW, 0.6)
+		else:
+			_lives.hit = 1.0
+			app.vibrate(90)
+			app.shake(0.7)
+			app.glitch(1.0)
+			app.flash(P.DROP, 0.8)
 	_lives.lives = rs.lives
 	_mult_label.text = Strings.MULT % rs.multiplier() if rs.multiplier() > 1 else ""
+	_set_fever(rs.multiplier() >= B.MULT_MAX)
 	_combo_label.text = Strings.COMBO % rs.streak if rs.streak >= 2 else ""
 	if rs.streak >= 2:
 		_combo_label.scale = Vector2(1.3, 1.3)
 		_combo_label.create_tween().tween_property(_combo_label, "scale", Vector2.ONE, 0.2)
+
+
+# 最大倍率の間は画面の縁を脈打たせる(「演出 弱」では弱く)。切れたら消す
+func _set_fever(on: bool) -> void:
+	if on == _fever:
+		return
+	_fever = on
+	var target := 0.0
+	if on:
+		target = 0.25 if app.save.effects_low else 0.7
+		_float_text(Strings.FEVER, P.NEW_ROW, Vector2(360, 200))
+		app.flash(P.NEW_ROW, 0.5)
+	_glow.create_tween().tween_method(func(v: float) -> void: _glow_mat.set_shader_parameter("strength", v),
+		float(_glow_mat.get_shader_parameter("strength")), target, 0.4 if on else 0.25)
 
 
 func _on_warned() -> void:
@@ -395,7 +600,12 @@ func _pop(btn: Button) -> void:
 
 
 func _float_text(text: String, color: Color, at: Vector2) -> void:
-	var l := P.label(text, 40, color, P.mono_bold())
+	# 等幅の太字は漢字を持たないので、日本語の文字は日本語の太字で出す
+	var ascii := true
+	for i in text.length():
+		if text.unicode_at(i) > 127:
+			ascii = false
+	var l := P.label(text, 40, color, P.mono_bold() if ascii else P.bold())
 	l.size = Vector2(240, 50)
 	l.position = at - Vector2(120, 0)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

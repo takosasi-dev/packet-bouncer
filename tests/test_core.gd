@@ -233,6 +233,86 @@ func test_share_text() -> bool:
 	var rs := _new_run()
 	for row: String in rs.grid:
 		expect(row.length() == B.CARDS_PER_STAGE and row.replace("o", "").replace("x", "").replace("-", "") == "", "格子の行: " + row)
+	# FR-22: ふつう・技なしは上の形のまま。ほかは 1 行目に難易度、2 行目に技の回数
+	var plain := ShareText.build("daily", "2026-11-10", 0, 6420, 71, 80, 8, grid, "https://example.github.io/packet-bouncer/", "normal", 0)
+	expect_eq(plain, wanted, "ふつう・技なしは §9.9 の例と同じ")
+	var hard := ShareText.build("daily", "2026-11-10", 0, 6420, 71, 80, 8, grid, "", "hard", 3).split("\n")
+	expect_eq(hard[0], "PacketBouncer 2026-11-10 (初回) むずかしい", "むずかしいの 1 行目")
+	expect_eq(hard[1], "6420点 / 正解 71/80 / ステージ8 / 技 3回", "技ありの 2 行目")
+	expect_eq(hard.size(), 2 + B.STAGES, "難易度と技を足しても行数は同じ")
+	var easy := ShareText.build("random", "", 0, 0, 0, 80, 1, grid, "", "easy", 0).split("\n")
+	expect_eq(easy[0], "PacketBouncer ランダム やさしい", "やさしいの 1 行目")
+	return true
+
+
+# FR-20: 難易度はライフと制限時間だけを変え、カードの列は変えない。知らない値はふつう
+func test_levels() -> bool:
+	var cards := {}
+	for level: String in B.LEVELS + ["nonsense"]:
+		var rs: RefCounted = RunState.new()
+		rs.start(Rng.daily_seed("2026-11-10"), "daily", "2026-11-10", level)
+		var want: String = level if level in B.LEVELS else "normal"
+		expect_eq(rs.level, want, "難易度 " + level)
+		expect_eq(rs.lives, B.LEVEL_LIVES[want], "%s のライフ" % level)
+		cards[level] = str(rs.stage_data()["cards"])
+		_tick_for(rs, B.PANEL_GUARD_SEC)
+		rs.dismiss_panel()
+		for _i in B.FREE_CARDS:
+			rs.answer(_right(rs))
+		expect(is_equal_approx(rs.time_limit, B.TIME_LIMIT_SEC[0] * B.LEVEL_TIME_SCALE[want]), "%s の制限時間 %f" % [level, rs.time_limit])
+	expect(cards["easy"] == cards["normal"] and cards["hard"] == cards["normal"], "難易度でカードの列が変わった")
+	expect_eq(B.LEVEL_LIVES["normal"], B.LIVES, "ふつうのライフは追加前と同じ")
+	expect_eq(B.LEVEL_TIME_SCALE["normal"], 1.0, "ふつうの倍率は 1.0")
+	return true
+
+
+func test_rank() -> bool:
+	var want := {80: "S", 79: "A", 72: "A", 71: "B", 60: "B", 59: "C", 40: "C", 39: "D", 0: "D"}
+	for n: int in want:
+		expect_eq(RunState.rank_for(n), want[n], "正解 %d のランク" % n)
+	return true
+
+
+# FR-21: 凍結・解析・防壁
+func test_skills() -> bool:
+	var rs := _new_run()
+	expect(not rs.can_use("freeze") and not rs.can_use("scan"), "パネル中は凍結と解析を使えない")
+	expect(not rs.use_skill("nonsense"), "知らない技を受けた")
+	_tick_for(rs, B.PANEL_GUARD_SEC)
+	rs.dismiss_panel()
+	expect(not rs.use_skill("freeze"), "制限時間なしのカードで凍結を受けた")
+	expect(rs.use_skill("scan"), "解析")
+	expect_eq(rs.deciding_row(), Evaluator.evaluate(rs.rules(), rs.current_card())["rule_index"], "解析の行")
+	expect(not rs.use_skill("scan"), "1 枚に 2 回目の解析を受けた")
+	for _i in B.FREE_CARDS:
+		rs.answer(_right(rs))
+	expect(rs.can_use("scan"), "次のカードで解析がまた使える")
+	# 凍結: 制限時間を何秒過ぎても時間切れにならず、答えると次のカードでは止まっていない
+	expect(rs.use_skill("freeze"), "凍結")
+	var left: float = rs.time_left
+	_tick_for(rs, rs.time_limit * 3.0)
+	expect_eq(rs.phase, RunState.Phase.CARD, "凍結中に時間切れになった")
+	expect_eq(rs.time_left, left, "凍結中に時間が減った")
+	expect(rs.answer(_right(rs))["correct"], "凍結中の正解")
+	expect(not rs.frozen, "次のカードまで凍結が残った")
+	expect(rs.use_skill("freeze"), "2 回目の凍結")
+	rs.answer(_right(rs))
+	expect(not rs.can_use("freeze"), "回数を使い切っても凍結できた")
+	expect_eq(rs.charges["freeze"], 0, "凍結の残り")
+	# 防壁: 次のミスでライフは減らないが、連続正解は 0・格子は x。1 回で消える
+	expect(rs.use_skill("shield"), "防壁")
+	expect(not rs.use_skill("shield"), "防壁を重ねて張れた")
+	var lives: int = rs.lives
+	var col: int = rs.card_index
+	var r: Dictionary = rs.answer(_wrong(rs))
+	expect(r["shielded"] and not r["correct"], "防壁がミスを受けた")
+	expect_eq(rs.lives, lives, "防壁でライフが減った")
+	expect_eq(rs.streak, 0, "防壁でも連続正解は 0")
+	expect_eq(rs.grid[0][col], "x", "防壁でも格子は x")
+	_tick_for(rs, B.FEEDBACK_SEC + B.MAX_DELTA)
+	rs.answer(_wrong(rs))
+	expect_eq(rs.lives, lives - 1, "防壁は 1 回で消える")
+	expect_eq(rs.skills_used, 4, "使った回数(解析 1・凍結 2・防壁 1)")
 	return true
 
 

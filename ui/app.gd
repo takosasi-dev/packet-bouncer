@@ -195,24 +195,24 @@ func show_title(message: String = "") -> void:
 
 func start_daily() -> void:
 	var date := Rng.today()
-	_start("daily", date, Rng.daily_seed(date))
+	_start("daily", date, Rng.daily_seed(date), save.level)
 
 
 func start_random() -> void:
-	_start("random", "", Rng.random_seed())
+	_start("random", "", Rng.random_seed(), save.level)
 
 
-# 「もう一度」: 日替わりなら同じ日付の種、ランダムなら新しい種
+# 「もう一度」: 日替わりなら同じ日付の種、ランダムなら新しい種。難易度はそのランの物を引き継ぐ(FR-20)
 func retry(rs: RefCounted) -> void:
 	if rs.mode == "daily":
-		_start("daily", rs.date, Rng.daily_seed(rs.date))
+		_start("daily", rs.date, Rng.daily_seed(rs.date), rs.level)
 	else:
-		start_random()
+		_start("random", "", Rng.random_seed(), rs.level)
 
 
-func _start(mode: String, date: String, run_seed: int) -> void:
+func _start(mode: String, date: String, run_seed: int, level: String) -> void:
 	var rs: RefCounted = RunState.new()
-	var error: String = rs.start(run_seed, mode, date)
+	var error: String = rs.start(run_seed, mode, date, level)
 	if error != "":
 		push_error(error)
 		show_title(preload("res://core/strings.gd").GEN_ERROR % run_seed)  # E-13: 得点は保存しない
@@ -225,7 +225,7 @@ func _start(mode: String, date: String, run_seed: int) -> void:
 # ランが終わったら 1 回呼ぶ(保存して結果画面へ)
 func finish_run(rs: RefCounted) -> void:
 	var attempts_before: int = save.daily_attempts(rs.date) if rs.mode == "daily" else 0
-	var new_best: bool = save.record_run(rs.mode, rs.date, rs.score, rs.correct, rs.stage(), rs.grid)
+	var new_best: bool = save.record_run(rs.mode, rs.date, rs.score, rs.correct, rs.stage(), rs.grid, rs.level)
 	var result := ResultScreen.new()
 	result.rs = rs
 	result.attempts_before = attempts_before

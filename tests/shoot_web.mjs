@@ -2,9 +2,10 @@
 // URL を渡さなければ build/web を /packet-bouncer/ の下に置いて手元で配信する。--play を付けると、Chrome で 1 ラン遊んで各画面を撮る。
 // 起動したか・転送量(キャッシュ無効)・通信先のホスト・コンソールのエラーを出す。画像は build/web_shots/
 // --mobile はスマホのエミュレーション(タッチ)で遊んで撮る。--perfect は今日の検問を正しく答えて 80 枚を通し(1 回だけわざとミス)、README 用の画像を撮る(答えは tests/answer_key.mjs)。
-//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect | --mobile]
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+// --gif はタイトル → ルール更新 → ステージ 1 の 10 枚(1 回だけわざとミス)を録って docs/images/play.gif に書く(ffmpeg を使う)。
+//   node tests/shoot_web.mjs [https://takosasi-dev.github.io/packet-bouncer/] [--play | --perfect | --mobile | --gif]
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -23,6 +24,10 @@ const BROWSERS = {
 	chrome: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
 	edge: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
 };
+const GIF = path.join(ROOT, 'docs', 'images', 'play.gif');
+const GIF_FRAMES = path.join(OUT, 'gif_frames');
+const GIF_MAX_BYTES = 4e6;
+const FFMPEG = process.env.FFMPEG || 'ffmpeg'; // PATH に無ければ環境変数 FFMPEG に ffmpeg の実行ファイルの場所を入れる
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 540, height: 960 }; // 720 × 1280 の 0.75 倍
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true }; // iPhone くらいの縦長
@@ -31,6 +36,9 @@ const KEYS = {
 	Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' },
 	ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
 	ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+	Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+	Digit1: { key: '1', code: 'Digit1', windowsVirtualKeyCode: 49, text: '1' },
+	Digit2: { key: '2', code: 'Digit2', windowsVirtualKeyCode: 50, text: '2' },
 };
 
 let failures = 0;
@@ -95,6 +103,15 @@ async function playScenario(page, shot) {
 	await press('Space');
 	await sleep(900);
 	await shot('03_card');
+	// 技の解析(2 キー)と一時停止(Esc → Space で再開)
+	await press('Digit2');
+	await sleep(500);
+	await shot('03_skill_scan');
+	await press('Escape');
+	await sleep(500);
+	await shot('03_pause');
+	await press('Space');
+	await sleep(500);
 	// ドラッグ: 少し動かして戻す → 大きく動かして離す(通す)
 	await mouse('mousePressed', card.x, card.y);
 	for (let dx = 0; dx <= 60; dx += 15) await mouse('mouseMoved', card.x + dx * scale, card.y);
@@ -110,6 +127,11 @@ async function playScenario(page, shot) {
 	await shot('06_after_drag');
 	await sleep(1600);
 	for (let i = 1; i <= 10; i++) {
+		if (i === 2) { // 3 枚目(制限時間あり)で凍結(1 キー)
+			await press('Digit1');
+			await sleep(500);
+			await shot('10_skill_freeze');
+		}
 		await press('ArrowRight');
 		await sleep(260);
 		await shot(`10_key_${String(i).padStart(2, '0')}`);
@@ -180,6 +202,76 @@ async function perfectScenario(page, shot) {
 	await shot('sound_clicked');
 	await reload();
 	await shot('sound_after_reload');
+}
+
+// README の動く画像: タイトル → 今日の検問 → ルール更新のパネル → ステージ 1 の 10 枚を正しく答える(6 枚目だけわざとミス)。
+// 画面の位置ではなくキーで動かすので、ボタンが増えても動く。コマ送りは Page.startScreencast で、各コマの長さは metadata.timestamp の差
+async function gifScenario(page) {
+	const press = async (name) => {
+		await page.send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS[name] });
+		await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS[name] });
+	};
+	const { answers } = dailyAnswers(localDate());
+	const MISS = 6;
+	const frames = [];
+	rmSync(GIF_FRAMES, { recursive: true, force: true });
+	mkdirSync(GIF_FRAMES, { recursive: true });
+	page.onEvent((msg) => {
+		if (msg.method !== 'Page.screencastFrame') return;
+		const p = msg.params;
+		const file = `f${String(frames.length).padStart(5, '0')}.jpg`;
+		writeFileSync(path.join(GIF_FRAMES, file), Buffer.from(p.data, 'base64'));
+		frames.push({ file, t: p.metadata.timestamp });
+		page.send('Page.screencastFrameAck', { sessionId: p.sessionId }).catch(() => { /* 閉じた後 */ });
+	});
+	await page.send('Page.startScreencast', { format: 'jpeg', quality: 90, maxWidth: PHONE.width, maxHeight: PHONE.height, everyNthFrame: 1 });
+	await sleep(1200); // タイトル
+	await press('Enter'); // 「今日の検問」にフォーカスがある
+	await sleep(1500); // ルール更新のパネル(PANEL_GUARD_SEC より長く)
+	await press('Space');
+	await sleep(700);
+	for (let k = 1; k <= 10; k++) {
+		const right = answers[0][k - 1].action;
+		const give = k === MISS ? (right === 'allow' ? 'drop' : 'allow') : right;
+		if (k === 2 || k === 4) { // 技も見せる: 2 枚目で解析、4 枚目(制限時間あり)で凍結
+			await press(k === 2 ? 'Digit2' : 'Digit1');
+			await sleep(700);
+		}
+		await press(give === 'allow' ? 'ArrowRight' : 'ArrowLeft');
+		await sleep(k === MISS ? 1800 : 700); // ミスは赤い光と理由の文字が読めるまで(FEEDBACK_SEC より長く)
+	}
+	await sleep(700);
+	await page.send('Page.stopScreencast');
+	await sleep(300); // 最後のコマが届くまで
+	expect(frames.length >= 20, `gif: コマが集まった(${frames.length} コマ)`);
+	if (frames.length >= 2) {
+		encodeGif(frames);
+		console.log(`    録画の長さ: ${(frames.at(-1).t - frames[0].t).toFixed(1)} 秒`);
+	}
+	rmSync(GIF_FRAMES, { recursive: true, force: true });
+}
+
+// コマと長さを ffmpeg の concat の一覧に書き、GIF にする。4 MB を超えたらコマ数・幅・色数を落として作り直す
+function encodeGif(frames) {
+	const ffmpeg = FFMPEG;
+	// 最後のコマの duration は concat が使わない(同じ file を足すと逆に 2 秒ほど延びる)。終わりの止まりは録画側の待ちで作る
+	const lines = frames.slice(0, -1).flatMap((f, i) => [`file '${f.file}'`, `duration ${(frames[i + 1].t - f.t).toFixed(3)}`]);
+	lines.push(`file '${frames.at(-1).file}'`);
+	const list = path.join(GIF_FRAMES, 'list.txt');
+	writeFileSync(list, `${lines.join('\n')}\n`);
+	mkdirSync(path.dirname(GIF), { recursive: true });
+	for (const [fps, width, colors] of [[12, 360, 256], [12, 360, 128], [10, 360, 128], [10, 320, 96], [8, 300, 64]]) {
+		const vf = `fps=${fps},scale=${width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=${colors}:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`;
+		const r = spawnSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-vf', vf, '-loop', '0', GIF], { encoding: 'utf8' });
+		if (!expect(r.status === 0, `gif: ffmpeg(${fps} fps・幅 ${width}・${colors} 色)`)) {
+			console.log(r.error?.message ?? r.stderr);
+			return;
+		}
+		const size = statSync(GIF).size;
+		console.log(`    ${path.relative(ROOT, GIF)}: ${(size / 1e6).toFixed(2)} MB(${fps} fps・幅 ${width}・${colors} 色)`);
+		if (size <= GIF_MAX_BYTES) return;
+	}
+	expect(false, 'gif: 4 MB 以下に収まった');
 }
 
 // スマホのエミュレーション(390 × 844、3 倍密度、タッチ)で、タップ・指でのスワイプ・2 本目の指・横向きを撮る
@@ -280,6 +372,7 @@ async function shoot(name, exe, url, play) {
 		if (play === 'play') await playScenario(page, shot);
 		else if (play === 'perfect') await perfectScenario(page, shot);
 		else if (play === 'mobile') await mobileScenario(page, shot);
+		else if (play === 'gif') await gifScenario(page);
 		const errors = logs.filter((l) => ['error', 'exception'].includes(l.level) && !l.text.includes('favicon.ico'));
 		errors.forEach((l) => console.log(`    [${l.level}] ${l.text}`));
 		expect(errors.length === 0, `${name}: コンソールにエラーが無い`);
@@ -296,8 +389,8 @@ async function shoot(name, exe, url, play) {
 async function main() {
 	rmSync(OUT, { recursive: true, force: true });
 	mkdirSync(OUT, { recursive: true });
-	const play = ['play', 'perfect', 'mobile'].find((m) => process.argv.includes(`--${m}`)) ?? '';
-	if (['perfect', 'mobile'].includes(play) && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
+	const play = ['play', 'perfect', 'mobile', 'gif'].find((m) => process.argv.includes(`--${m}`)) ?? '';
+	if (['perfect', 'mobile', 'gif'].includes(play) && !expect(selfCheck(), 'tests/answer_key.mjs が仕様書の固定値と合う')) return;
 	let url = process.argv.slice(2).find((a) => !a.startsWith('--'));
 	let server = null;
 	let root = null;

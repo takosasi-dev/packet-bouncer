@@ -1,4 +1,4 @@
-"""効果音 5 つを合成して assets/sfx/ に書く(仕様書 FR-16)。
+"""効果音 6 つ(5 つ + 技の音)を合成して assets/sfx/ に書く(仕様書 FR-16)。
 
 標準ライブラリだけで作り、乱数を使わないので何度走らせても同じバイト列になる。
 16bit PCM・モノラル・44100 Hz、最大音量は約 -3 dBFS、頭と尻に短いフェードを付ける。
@@ -79,6 +79,13 @@ def rule_update():
     return buf
 
 
+def skill():
+    # 技(FR-21): 上へ滑るきらめきと、E6-B6 の短い 2 音
+    buf = mix([], note(659.25, 0.28, SINE, f1=1975.53, decay=6, attack=0.01, release=0.08), 0.0, 0.45)
+    mix(buf, note(1318.51, 0.12, BELL, decay=14), 0.05, 0.5)
+    return mix(buf, note(1975.53, 0.16, BELL, decay=12), 0.13, 0.45)
+
+
 def result():
     # G4-C5-E5 の短い前打ちから C メジャーの和音へ解決し、ゆっくり消える
     buf = []
@@ -104,7 +111,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     OUT.mkdir(parents=True, exist_ok=True)
     for name, make in [("correct", correct), ("wrong", wrong), ("warn", warn),
-                       ("rule_update", rule_update), ("result", result)]:
+                       ("rule_update", rule_update), ("result", result), ("skill", skill)]:
         path = OUT / (name + ".wav")
         with wave.open(str(path), "wb") as w:
             w.setnchannels(1)

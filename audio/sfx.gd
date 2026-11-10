@@ -2,7 +2,7 @@
 # ファイルが無い・読めない音は黙って飛ばす(落ちない・エラーを出さない)。知らない名前も無視する。
 extends Node
 
-const NAMES := ["correct", "wrong", "warn", "rule_update", "result"]
+const NAMES := ["correct", "wrong", "warn", "rule_update", "result", "skill"]
 const POOL_SIZE := 4
 
 var enabled := true

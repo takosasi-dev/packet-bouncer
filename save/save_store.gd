@@ -7,7 +7,9 @@ const VERSION := 1
 const DEFAULT_PATH := "user://save.json"
 
 var path: String
-var best_score := 0
+var best_score := 0  # 「ふつう」の自己ベスト(§9.8 の形のまま)
+var best_by_level: Dictionary = {}  # 難易度 -> 自己ベスト(FR-22)。normal は best_score と同じ値
+var level := "normal"  # 選んでいる難易度(FR-20)
 var sound_on := true
 var effects_low := false  # 演出を弱める(揺れ・色ずれを止める)。§9.8 に無い追加の項目で、無ければ false
 var daily: Dictionary = {}  # 日付 -> {attempts, first_score, first_correct, first_stage, first_grid}
@@ -19,6 +21,10 @@ func _init(p_path: String = DEFAULT_PATH) -> void:
 
 func load_data() -> void:
 	best_score = 0
+	best_by_level = {}
+	for l: String in B.LEVELS:
+		best_by_level[l] = 0
+	level = "normal"
 	sound_on = true
 	effects_low = false
 	daily = {}
@@ -37,6 +43,15 @@ func load_data() -> void:
 	sound_on = sound
 	var low: Variant = parsed.get("effects_low")
 	effects_low = low is bool and low
+	var lv: Variant = parsed.get("level")
+	if lv is String and lv in B.LEVELS:
+		level = lv
+	var bests: Variant = parsed.get("best_by_level")
+	if bests is Dictionary:
+		for l: String in B.LEVELS:
+			if bests.get(l) is float:
+				best_by_level[l] = int(bests[l])
+	best_by_level["normal"] = best_score
 	for date: Variant in days:
 		var d: Variant = days[date]
 		if date is String and d is Dictionary and d.get("attempts") is float and d.get("first_score") is float:
@@ -44,6 +59,7 @@ func load_data() -> void:
 				"attempts": int(d["attempts"]), "first_score": int(d["first_score"]),
 				"first_correct": int(d.get("first_correct", 0)), "first_stage": int(d.get("first_stage", 0)),
 				"first_grid": str(d.get("first_grid", "")),
+				"first_level": d["first_level"] if d.get("first_level") is String and d["first_level"] in B.LEVELS else "normal",
 			}
 
 
@@ -51,7 +67,8 @@ func save_data() -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		return false
-	file.store_string(JSON.stringify({"version": VERSION, "best_score": best_score, "sound_on": sound_on, "effects_low": effects_low, "daily": daily}, "  "))
+	file.store_string(JSON.stringify({"version": VERSION, "best_score": best_score, "best_by_level": best_by_level, "level": level,
+		"sound_on": sound_on, "effects_low": effects_low, "daily": daily}, "  "))
 	file.close()
 	return true
 
@@ -70,17 +87,28 @@ func set_effects_low(low: bool) -> void:
 	save_data()
 
 
-# ランを終えたときに 1 回呼ぶ。自己ベストを更新したら true
-func record_run(mode: String, date: String, score: int, correct: int, stage: int, grid: Array) -> bool:
-	var new_best := score > best_score
+func set_level(p_level: String) -> void:
+	level = p_level if p_level in B.LEVELS else "normal"
+	save_data()
+
+
+func best_for(p_level: String) -> int:
+	return int(best_by_level.get(p_level, 0))
+
+
+# ランを終えたときに 1 回呼ぶ。その難易度の自己ベストを更新したら true
+func record_run(mode: String, date: String, score: int, correct: int, stage: int, grid: Array, p_level: String = "normal") -> bool:
+	var new_best := score > best_for(p_level)
 	if new_best:
-		best_score = score
+		best_by_level[p_level] = score
+		if p_level == "normal":
+			best_score = score
 	if mode == "daily":
 		if daily.has(date):
 			daily[date]["attempts"] += 1
 		else:
 			daily[date] = {"attempts": 1, "first_score": score, "first_correct": correct, "first_stage": stage,
-				"first_grid": "/".join(grid)}
+				"first_grid": "/".join(grid), "first_level": p_level}
 		var dates := daily.keys()
 		dates.sort()
 		dates.reverse()
