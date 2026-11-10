@@ -1,0 +1,4 @@
+.godot/
+build/
+tools/font_src/
+__pycache__/

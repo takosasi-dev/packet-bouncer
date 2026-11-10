@@ -1,0 +1,72 @@
+# main への push と手動実行で、テスト → Web 書き出し → GitHub Pages への配置を行う(仕様書 §9.10)。
+# deploy は build の成功に依存させ、テストが 1 件でも落ちたら配置しない(INV-7)。
+# 書き出し結果はコミットせず、ここで作って Pages に置く(D-3)。
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Godot 本体と Web の書き出しテンプレートを取得
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d "$RUNNER_TEMP/godot"
+          echo "$RUNNER_TEMP/godot" >> "$GITHUB_PATH"
+          mv "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$RUNNER_TEMP/godot/godot"
+          # ponytail: tpz は全機種分(約 1.3GB)を毎回取る。遅くなったら actions/cache か Range 取得にする
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          dest="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          unzip -j templates.tpz templates/version.txt templates/web_nothreads_release.zip -d "$dest"
+          rm godot.zip templates.tpz
+          echo "書き出しテンプレートの置き場所: $dest"
+          ls -l "$dest"
+
+      - name: 取り込み
+        run: godot --headless --path . --import
+
+      - name: テスト
+        run: godot --headless --path . --script res://tests/run_tests.gd
+
+      - name: Web 書き出し
+        run: |
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html
+          ls -l build/web
+          test -f build/web/index.html && test -f build/web/index.wasm && test -f build/web/index.pck
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
