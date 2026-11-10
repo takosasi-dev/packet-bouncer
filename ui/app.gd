@@ -17,6 +17,8 @@ const FLASH_DECAY := 4.0
 const PERF_WINDOW_SEC := 4.0  # タッチ端末で描画の速さを測る長さ
 const PERF_MIN_FPS := 40.0  # これより遅ければ仕上げのシェーダーを外す
 const VIBRATE_MS := 90
+const LOW_FLASH := 0.35  # 「演出 弱」の閃光の強さ
+const LOW_BG_SPEED := 0.3  # 「演出 弱」の背景の速さ
 
 var save: RefCounted = SaveStore.new()
 var stage: Control  # 画面を置く 720 × 1280 の舞台
@@ -68,6 +70,7 @@ func _ready() -> void:
 	_touch = DisplayServer.is_touchscreen_available()
 	_build_rotate_hint()
 
+	_apply_effects()
 	get_viewport().size_changed.connect(_layout)
 	_layout()
 	show_title()
@@ -144,19 +147,35 @@ func _jitter_unit() -> float:
 
 
 # 演出: 揺れ・色ずれ・閃光(強さは 0〜1)
+# 「演出 弱」では揺れと色ずれを止め、閃光を弱め、背景をゆっくりにする
 func shake(strength: float) -> void:
-	_shake = maxf(_shake, strength)
+	if not save.effects_low:
+		_shake = maxf(_shake, strength)
 
 
 func glitch(strength: float) -> void:
-	_glitch = maxf(_glitch, strength)
+	if not save.effects_low:
+		_glitch = maxf(_glitch, strength)
 
 
 func flash(color: Color, strength: float) -> void:
+	var s := strength * (LOW_FLASH if save.effects_low else 1.0)
 	_crt_mat.set_shader_parameter("flash_color", color)
-	_flash = maxf(_flash, strength)
+	_flash = maxf(_flash, s)
 	_bg_mat.set_shader_parameter("flash_color", color)
-	_bg_flash = maxf(_bg_flash, strength)
+	_bg_flash = maxf(_bg_flash, s)
+
+
+func set_effects_low(low: bool) -> void:
+	save.set_effects_low(low)
+	_apply_effects()
+
+
+func _apply_effects() -> void:
+	_bg_mat.set_shader_parameter("speed", LOW_BG_SPEED if save.effects_low else 1.0)
+	if save.effects_low:
+		_shake = 0.0
+		_glitch = 0.0
 
 
 func _swap(screen: Control) -> void:

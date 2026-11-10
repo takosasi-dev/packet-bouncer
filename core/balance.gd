@@ -16,7 +16,7 @@ const MULT_MAX := 5
 const TIME_BONUS_MAX := 50
 const SWIPE_PX := 120.0
 const GEN_MAX_TRIES := 2000
-const SHARE_URL := ""
+const SHARE_URL := "https://takosasi-dev.github.io/packet-bouncer/"
 const MAX_DELTA := 0.1  # 1 フレームの delta の上限(INV-3)
 const DAILY_KEEP := 7  # 保存する日替わりの件数(§9.8)
 

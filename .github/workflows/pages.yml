@@ -54,8 +54,10 @@ jobs:
           godot --headless --path . --export-release "Web" build/web/index.html
           ls -l build/web
           test -f build/web/index.html && test -f build/web/index.wasm && test -f build/web/index.pck
-          # AC-18: 書き出した index.html に外のドメインへの URL が無い
-          if grep -nE 'https?://' build/web/index.html; then echo "index.html に URL がある"; exit 1; fi
+          # AC-18: 書き出した index.html に外のドメインへの URL が無い(自分の Pages の URL は、URL のプレビュー用に許す)
+          if grep -oE 'https?://[^"]*' build/web/index.html | grep -v '^https://takosasi-dev.github.io/packet-bouncer/'; then echo "index.html に外の URL がある"; exit 1; fi
+          # URL を貼ったときのプレビュー画像(tools/make_og.py で作った物)
+          cp docs/images/og.png build/web/og.png
 
       - uses: actions/configure-pages@v6
 

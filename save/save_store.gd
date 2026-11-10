@@ -9,6 +9,7 @@ const DEFAULT_PATH := "user://save.json"
 var path: String
 var best_score := 0
 var sound_on := true
+var effects_low := false  # 演出を弱める(揺れ・色ずれを止める)。§9.8 に無い追加の項目で、無ければ false
 var daily: Dictionary = {}  # 日付 -> {attempts, first_score, first_correct, first_stage, first_grid}
 
 
@@ -19,11 +20,13 @@ func _init(p_path: String = DEFAULT_PATH) -> void:
 func load_data() -> void:
 	best_score = 0
 	sound_on = true
+	effects_low = false
 	daily = {}
 	if not FileAccess.file_exists(path):
 		return
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
-	if not parsed is Dictionary or parsed.get("version") != float(VERSION):
+	# 型を確かめてから比べる(型の違う値どうしの == は実行時エラーになる)
+	if not parsed is Dictionary or not parsed.get("version") is float or parsed["version"] != float(VERSION):
 		return
 	var best: Variant = parsed.get("best_score")
 	var sound: Variant = parsed.get("sound_on")
@@ -32,6 +35,8 @@ func load_data() -> void:
 		return
 	best_score = int(best)
 	sound_on = sound
+	var low: Variant = parsed.get("effects_low")
+	effects_low = low is bool and low
 	for date: Variant in days:
 		var d: Variant = days[date]
 		if date is String and d is Dictionary and d.get("attempts") is float and d.get("first_score") is float:
@@ -46,7 +51,7 @@ func save_data() -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		return false
-	file.store_string(JSON.stringify({"version": VERSION, "best_score": best_score, "sound_on": sound_on, "daily": daily}, "  "))
+	file.store_string(JSON.stringify({"version": VERSION, "best_score": best_score, "sound_on": sound_on, "effects_low": effects_low, "daily": daily}, "  "))
 	file.close()
 	return true
 
@@ -57,6 +62,11 @@ func daily_attempts(date: String) -> int:
 
 func set_sound(on: bool) -> void:
 	sound_on = on
+	save_data()
+
+
+func set_effects_low(low: bool) -> void:
+	effects_low = low
 	save_data()
 
 

@@ -11,6 +11,7 @@ var message := ""  # E-13 などの知らせ
 var _logo: Control
 var _ghosts: Array[Label] = []
 var _sound: Button
+var _effects: Button
 var _howto: Control
 var _time := 0.0
 var _started := false
@@ -41,13 +42,17 @@ func _ready() -> void:
 	menu.add_child(random)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 22)
+	row.add_theme_constant_override("separation", 14)
 	menu.add_child(row)
-	_sound = P.button("", P.DIM, 28, 80)
+	_sound = P.button("", P.DIM, 26, 80)
 	_sound.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sound.pressed.connect(_toggle_sound)
 	row.add_child(_sound)
-	var howto := P.button(Strings.HOWTO, P.DIM, 28, 80)
+	_effects = P.button("", P.DIM, 26, 80)
+	_effects.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_effects.pressed.connect(_toggle_effects)
+	row.add_child(_effects)
+	var howto := P.button(Strings.HOWTO, P.DIM, 26, 80)
 	howto.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	howto.pressed.connect(_toggle_howto)
 	row.add_child(howto)
@@ -148,6 +153,9 @@ func _process(delta: float) -> void:
 	var amp := 2.0 + burst * 12.0
 	_ghosts[0].position = Vector2(-amp + _unit() * burst * 6.0, 0)
 	_ghosts[1].position = Vector2(amp + _unit() * burst * 6.0, _unit() * burst * 3.0)
+	if app != null and app.save.effects_low:
+		burst = 0.0
+		amp = 2.0
 	if burst > 0.0 and app != null:
 		app.glitch(0.25)
 
@@ -176,6 +184,13 @@ func _toggle_sound() -> void:
 
 func _update_sound() -> void:
 	_sound.text = Strings.SOUND_ON if app.save.sound_on else Strings.SOUND_OFF
+	_effects.text = Strings.EFFECTS_LOW if app.save.effects_low else Strings.EFFECTS_FULL
+
+
+func _toggle_effects() -> void:
+	app.set_effects_low(not app.save.effects_low)
+	_update_sound()
+	Sfx.play("correct")
 
 
 func _build_howto() -> void:

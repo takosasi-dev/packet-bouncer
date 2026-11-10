@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- URL を貼ったときのプレビュー画像(og.png、1200 × 630)の元。tools/make_og.py が窓なしの Chrome で撮る。
+     文字は同梱フォント(絞った物)にある字だけを使う。画面の画像は docs/images/ の撮影結果。 -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "PBSans"; src: url("../assets/fonts/NotoSansJP-Subset.ttf"); }
+@font-face { font-family: "PBMono"; src: url("../assets/fonts/JetBrainsMono-Subset.ttf"); }
+html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+body {
+	background:
+		linear-gradient(180deg, rgba(7, 11, 20, 0) 55%, rgba(46, 140, 200, 0.10) 100%),
+		radial-gradient(circle at 1px 1px, rgba(46, 140, 200, 0.35) 1.5px, transparent 2px) 0 0 / 40px 40px,
+		#070b14;
+	font-family: "PBSans";
+	color: #e6f1ff;
+	position: relative;
+}
+.copy { position: absolute; left: 60px; top: 175px; width: 600px; white-space: nowrap; }
+.title { font-size: 86px; font-weight: 700; letter-spacing: 2px; line-height: 1.1;
+	text-shadow: -4px 0 rgba(46, 230, 184, 0.65), 4px 0 rgba(255, 77, 109, 0.65); }
+.product { font-family: "PBMono"; font-size: 44px; color: #2ee6b8; margin-top: 18px; }
+.bar { width: 380px; height: 4px; background: #2ee6b8; margin: 22px 0; box-shadow: 0 0 18px #2ee6b8; }
+.tag { font-size: 22px; color: #b8c6de; }
+.shots { position: absolute; right: 24px; top: 40px; width: 520px; height: 560px; }
+.shots img { position: absolute; width: 270px; border-radius: 22px; border: 2px solid #6c8cff;
+	box-shadow: 0 0 40px rgba(108, 140, 255, 0.45); }
+.a { left: 0; top: 40px; transform: rotate(-6deg); }
+.b { right: 0; top: 10px; transform: rotate(5deg); border-color: #ffb547 !important; box-shadow: 0 0 40px rgba(255, 181, 71, 0.45) !important; }
+</style>
+</head>
+<body>
+<div class="copy">
+	<div class="title">パケット検問</div>
+	<div class="product">PacketBouncer</div>
+	<div class="bar"></div>
+	<div class="tag">ファイアウォールになって、パケットを仕分けよう</div>
+</div>
+<div class="shots">
+	<img class="a" src="../docs/images/play.png" alt="">
+	<img class="b" src="../docs/images/miss.png" alt="">
+</div>
+</body>
+</html>

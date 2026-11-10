@@ -122,3 +122,21 @@ func test_missing_sfx_does_not_crash() -> bool:
 	expect(sfx._streams.is_empty(), "無いフォルダから音を読んだ")
 	sfx.queue_free()
 	return true
+
+
+# 「演出 弱」: 保存され、揺れと色ずれが起きない(依頼者の追加 2026-11-10)
+func test_effects_low_stops_shake_and_glitch() -> bool:
+	var app := _new_app()
+	app.set_effects_low(true)
+	app.shake(1.0)
+	app.glitch(1.0)
+	expect(app._shake == 0.0 and app._glitch == 0.0, "演出 弱でも揺れ・色ずれが起きた")
+	var again: RefCounted = SaveStore.new(SAVE_PATH)
+	again.load_data()
+	expect(again.effects_low, "演出 弱が保存されない")
+	app.set_effects_low(false)
+	app.shake(1.0)
+	expect(app._shake > 0.0, "演出 強に戻しても揺れない")
+	app.queue_free()
+	DirAccess.remove_absolute(SAVE_PATH)
+	return true

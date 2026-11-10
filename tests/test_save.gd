@@ -47,7 +47,8 @@ func test_keeps_newest_seven_days() -> bool:
 
 
 func test_broken_file_starts_from_default() -> bool:
-	for text: String in ["{ broken", "[1, 2]", '{"version": 2, "best_score": 5, "sound_on": false, "daily": {}}']:
+	for text: String in ["{ broken", "[1, 2]", '{"version": 2, "best_score": 5, "sound_on": false, "daily": {}}',
+			'{"version": "1", "best_score": 5, "sound_on": false, "daily": {}}', '{"version": 1, "best_score": "5", "sound_on": false, "daily": {}}']:
 		var file := FileAccess.open(PATH, FileAccess.WRITE)
 		file.store_string(text)
 		file.close()

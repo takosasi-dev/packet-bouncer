@@ -119,6 +119,12 @@ async function playScenario(page, shot) {
 	await sleep(1500);
 	await shot('20_result');
 	await gray('20_result_gray');
+	// 「結果を送る」: 差し込んだ偽の navigator.share に結果の文字が渡るか(本物の共有シートは実機で見る)
+	await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 531 * scale, y: 1034 * scale, button: 'left', buttons: 1, clickCount: 1 });
+	await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 531 * scale, y: 1034 * scale, button: 'left', buttons: 0, clickCount: 1 });
+	await sleep(800);
+	const shared = (await page.send('Runtime.evaluate', { expression: 'window.__shared ? window.__shared.text : null', returnByValue: true })).result.value;
+	expect(typeof shared === 'string' && shared.startsWith('PacketBouncer ') && shared.includes('https://takosasi-dev.github.io/packet-bouncer/'), `「結果を送る」で共有に渡った文字: ${JSON.stringify(shared)}`);
 }
 
 // 今日の検問を正しく答えて通す。ステージ 7 の 6 枚目だけわざと間違えて、順序のひっかけのミスを撮る
@@ -258,6 +264,7 @@ async function shoot(name, exe, url, play) {
 		} else {
 			await page.send('Emulation.setDeviceMetricsOverride', { ...(play ? PHONE : DESKTOP), deviceScaleFactor: 1, mobile: false });
 		}
+		if (play === 'play') await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'navigator.share = async (d) => { window.__shared = d; };' }); // 「結果を送る」を出させる
 		await page.send('Page.navigate', { url });
 		const booted = await waitFor(() => logs.some((l) => l.text.startsWith('Godot Engine v')), BOOT_TIMEOUT_MS);
 		expect(booted !== null, `${name}: ${url} で Godot が起動した`);

@@ -1,5 +1,5 @@
 # 結果画面(仕様書 FR-11・FR-14・§9.9): 得点、正解数、最大の連続正解、到達ステージ、8 × 10 の結果の格子、
-# 自己ベストの更新、選択できる共有テキストと「結果をコピー」、「もう一度」「タイトルへ」。
+# 自己ベストの更新、選択できる共有テキストと「結果をコピー」(共有シートがあれば「結果を送る」も)、「もう一度」「タイトルへ」。
 # コピーは試すだけで、成功したとは言わない(INV-11)。「もう一度」は最初の 1 回だけ受ける(E-17)。
 extends Control
 
@@ -107,6 +107,15 @@ func _ready() -> void:
 		_copy_note.text = Strings.COPY_TRIED
 		Sfx.play("correct"))
 	add_child(copy)
+	if _can_send():  # スマホの共有シート(LINE・X など)。無いブラウザでは出さない
+		copy.size = Vector2(322, 72)
+		var send := P.button(Strings.SEND, P.ALLOW, 28, 72)
+		send.position = Vector2(370, 998)
+		send.size = Vector2(322, 72)
+		send.pressed.connect(func() -> void:
+			JavaScriptBridge.eval("navigator.share({text: %s}).catch(function () {})" % JSON.stringify(share.text), true)
+			Sfx.play("correct"))
+		add_child(send)
 	_copy_note = P.label("", 22, P.DIM)
 	_copy_note.position = Vector2(28, 1072)
 	_copy_note.size = Vector2(664, 62)
@@ -164,6 +173,14 @@ func _process(delta: float) -> void:
 	else:
 		_score_label.text = str(rs.score)
 		_score_label.scale = Vector2.ONE
+
+
+# Web で navigator.share があるときだけ「結果を送る」を出す(送れたかは分からないので、成功とは言わない。INV-11)
+func _can_send() -> bool:
+	if not OS.has_feature("web"):
+		return false
+	# 戻り値は文字列で比べる(型の違う値どうしの == は実行時エラーになり、リリース版では黙って止まる)
+	return str(JavaScriptBridge.eval("typeof navigator.share", true)) == "function"
 
 
 func _leave(again: bool) -> void:
